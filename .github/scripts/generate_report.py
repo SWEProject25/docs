@@ -422,7 +422,7 @@ def main():
     markdown = generate_sprint_report(all_data, (start, end))
     
     # Save report
-    reports_dir = Path('sprint_reports')
+    reports_dir = Path('reports')
     reports_dir.mkdir(exist_ok=True)
     
     week_num = end.isocalendar()[1]
