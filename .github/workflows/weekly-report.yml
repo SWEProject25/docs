@@ -4,7 +4,16 @@ on:
   schedule:
     # Runs every Friday at 00:00 (midnight)
     - cron: '0 0 * * 5'
-  workflow_dispatch: # Allows manual trigger
+  workflow_dispatch:
+    inputs:
+      week_number:
+        description: 'Week number (1-53, leave empty for current week)'
+        required: false
+        type: string
+      year:
+        description: 'Year (leave empty for current year)'
+        required: false
+        type: string
 
 jobs:
   generate-report:
@@ -30,6 +39,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
           ORG_NAME: ${{ github.repository_owner }}
+          WEEK_NUMBER: ${{ inputs.week_number }}
+          YEAR: ${{ inputs.year }}
         run: python .github/scripts/generate_report.py
       
       - name: Commit and Push Report
@@ -37,4 +48,15 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add reports/
-          git diff --quiet && git diff --staged --quiet || (git commit -m "📊 Weekly Report - Week $(date +%V) $(date +%Y)" && git push)
+          
+          # Determine week for commit message
+          if [ -n "${{ inputs.week_number }}" ]; then
+            WEEK="${{ inputs.week_number }}"
+            YEAR="${{ inputs.year }}"
+            [ -z "$YEAR" ] && YEAR=$(date +%Y)
+          else
+            WEEK=$(date +%V)
+            YEAR=$(date +%Y)
+          fi
+          
+          git diff --quiet && git diff --staged --quiet || (git commit -m "📊 Weekly Report - Week $WEEK $YEAR" && git push)
