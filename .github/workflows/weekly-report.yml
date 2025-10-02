@@ -37,7 +37,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests
+          pip install requests reportlab
 
       - name: Generate Weekly Report
         env:
