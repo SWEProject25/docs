@@ -13,7 +13,7 @@ GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
 ORG_NAME = os.environ.get('ORG_NAME')
 # Adjusted REPOS to reflect the Social Network project structure more accurately
 # Assuming 'frontend', 'backend', 'mobile', 'devops' are your primary repos
-REPOS = ['social-network-frontend', 'social-network-backend', 'social-network-mobile', 'social-network-devops', 'social-network-testing']
+REPOS = ['frontend', 'backend', 'mobile', 'devops', 'testing']
 WEEK_NUMBER = os.environ.get('WEEK_NUMBER')
 YEAR = os.environ.get('YEAR')
 
