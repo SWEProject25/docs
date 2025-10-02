@@ -8,9 +8,9 @@
 
 ## Sprint Overview
 
-- Issues Created: **2**
-- Issues Closed: **0**
-- Issues Still Open: **2**
+- Issues Created: **4**
+- Issues Closed: **1**
+- Issues Still Open: **3**
 - Pull Requests Merged: **1**
 - Active Repositories: **2/5**
 
@@ -20,11 +20,29 @@
 
 ### Issues
 
-**Summary:** 1 Open | 0 Closed
+**Summary:** 2 Open | 1 Closed
 
 | # | Title | Status | Type | Priority | Creator | Assigned To | Created | Completed | Time |
 |---|-------|--------|------|----------|---------|-------------|---------|-----------|------|
 | #1 | [add ui button](https://github.com/SWEProject25/frontend/issues/1) | 🟢 Open | Feature | Unset | ahmedfathy0-0 | Unassigned | 2025-10-02 | - | - |
+| #2 | [add selector component](https://github.com/SWEProject25/frontend/issues/2) | ✅ Closed | Feature | Unset | ahmedfathy0-0 | ahmedfathy0-0 | 2025-10-02 | 2025-10-02 | 0h |
+| #4 | [add another hello](https://github.com/SWEProject25/frontend/issues/4) | 🟢 Open | Feature | Unset | karimzakzouk | karimzakzouk | 2025-10-02 | - | - |
+
+### Pull Requests
+
+**Status:** 2 Open | 0 Merged
+
+- **#5** - Update README.md
+  - Status: Open
+  - Author: karimzakzouk
+  - Changes: +0/-0 lines
+  - Link: https://github.com/SWEProject25/frontend/pull/5
+
+- **#3** - Update README to correct user interactions description
+  - Status: Open
+  - Author: karimzakzouk
+  - Changes: +0/-0 lines
+  - Link: https://github.com/SWEProject25/frontend/pull/3
 
 ---
 
@@ -60,19 +78,19 @@
 
 | Member | Issues Created | Issues Closed | Issues Assigned | PRs Opened | PRs Merged | Repositories |
 |--------|----------------|---------------|-----------------|------------|------------|-------------|
-| ahmedfathy0-0 | 1 | 0 | 1 | 0 | 0 | devops, frontend |
+| karimzakzouk | 2 | 0 | 1 | 2 | 0 | devops, frontend |
+| ahmedfathy0-0 | 2 | 1 | 2 | 0 | 0 | devops, frontend |
 | Uderscore | 0 | 0 | 0 | 1 | 1 | mobile |
-| karimzakzouk | 1 | 0 | 0 | 0 | 0 | devops |
 
 ### Sprint Velocity
 
-- Issues Closed: **0**
+- Issues Closed: **1**
 - PRs Merged: **1**
-- Velocity Score: **1**
+- Velocity Score: **2**
 
 ### Outstanding Work
 
-- Total Open Issues: **2**
+- Total Open Issues: **3**
 - Unassigned Issues: **1**
 
 ---
