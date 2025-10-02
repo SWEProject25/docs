@@ -2,7 +2,7 @@ name: Weekly Progress Report
 
 on:
   schedule:
-    # Runs every Friday at 00:00 UTC (midnight)
+    # Runs every Friday
     - cron: '0 0 * * 5'
   workflow_dispatch:
     inputs:
@@ -36,7 +36,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests==2.31.0 reportlab==4.0.7
+          pip install requests==2.31.0 reportlab==4.0.7 python-dotenv==1.0.0 google-generativeai==0.8.3 PyPDF2==3.0.1
 
       - name: Generate Weekly Report
         env:
@@ -44,7 +44,7 @@ jobs:
           ORG_NAME: ${{ github.repository_owner }}
           WEEK_NUMBER: ${{ inputs.week_number }}
           YEAR: ${{ inputs.year }}
-        run: python .github/scripts/generate_report.py
+        run: python app.py
       
       - name: Commit and Push Report
         run: |

@@ -7,10 +7,25 @@ from collections import defaultdict
 import requests
 from pathlib import Path
 import math
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import cm
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak, HRFlowable, Flowable
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
+from reportlab.platypus.flowables import KeepTogether
+from reportlab.graphics.shapes import Drawing
+from reportlab.graphics.charts.barcharts import VerticalBarChart
+from reportlab.graphics.charts.piecharts import Pie
+from reportlab.graphics.charts.legends import Legend
+import google.generativeai as genai
+from PyPDF2 import PdfReader
+
 
 # Configuration
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
-ORG_NAME = os.environ.get('ORG_NAME')
+ORG_NAME = os.environ.get('ORG_NAME') or "SWEProject25"
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 # Adjusted REPOS to reflect the Social Network project structure more accurately
 # Assuming 'frontend', 'backend', 'mobile', 'devops' are your primary repos
 REPOS = ['frontend', 'backend', 'mobile', 'devops', 'testing']
@@ -229,17 +244,505 @@ def format_timedelta(delta):
     else:
         return f"{minutes}m"
 
+# --- Project Requirements Extraction ---
+
+def read_requirement_pdfs():
+    """Read all PDF files from src/requirement folder and extract text."""
+    requirement_text = ""
+    
+    # Look for requirement PDFs in common locations
+    possible_paths = [
+        Path('resources'),  # Primary location
+        Path('src/requirement'),
+        Path('requirement'),
+        Path('requirements'),
+        Path('docs/requirements'),
+        Path('.')
+    ]
+    
+    pdf_files = []
+    for path in possible_paths:
+        if path.exists() and path.is_dir():
+            pdf_files.extend(list(path.glob('*.pdf')))
+    
+    if not pdf_files:
+        print("  ℹ No requirement PDFs found in project folders")
+        return None
+    
+    print(f"  📄 Found {len(pdf_files)} requirement PDF(s)")
+    
+    for pdf_path in pdf_files:
+        try:
+            reader = PdfReader(str(pdf_path))
+            text = f"\n\n=== {pdf_path.name} ===\n"
+            for page in reader.pages:
+                text += page.extract_text() + "\n"
+            requirement_text += text
+            print(f"     ✓ Loaded: {pdf_path.name}")
+        except Exception as e:
+            print(f"     ⚠ Could not read {pdf_path.name}: {e}")
+    
+    return requirement_text if requirement_text else None
+
+# --- AI Insights Generation ---
+
+def generate_ai_insights(all_data, start, end):
+    """Generate intelligent insights using Google Gemini AI."""
+    
+    # Prepare data summary for AI analysis
+    total_commits = sum(len(repo['commits']) for repo in all_data)
+    total_issues_created = sum(len([i for i in repo['issues'] if start <= datetime.fromisoformat(i['created_at'].replace('Z', '+00:00')) < end]) for repo in all_data)
+    total_issues_closed = sum(len([i for i in repo['issues'] if i.get('closed_at') and start <= datetime.fromisoformat(i['closed_at'].replace('Z', '+00:00')) < end]) for repo in all_data)
+    total_prs_opened = sum(len([pr for pr in repo['pull_requests'] if start <= datetime.fromisoformat(pr['created_at'].replace('Z', '+00:00')) < end]) for repo in all_data)
+    total_prs_merged = sum(len([pr for pr in repo['pull_requests'] if pr.get('merged_at') and start <= datetime.fromisoformat(pr['merged_at'].replace('Z', '+00:00')) < end]) for repo in all_data)
+    
+    # Analyze contributors
+    all_commits = [c for repo in all_data for c in repo['commits']]
+    contributors = defaultdict(int)
+    for commit in all_commits:
+        author = commit.get('commit', {}).get('author', {}).get('name', 'Unknown')
+        contributors[author] += 1
+    
+    # Analyze issue types
+    all_issues = [i for repo in all_data for i in repo['issues'] if start <= datetime.fromisoformat(i['created_at'].replace('Z', '+00:00')) < end]
+    issue_types = defaultdict(int)
+    for issue in all_issues:
+        issue_types[get_issue_type(issue)] += 1
+    
+    # Repository breakdown
+    repo_summary = []
+    for repo in all_data:
+        repo_summary.append({
+            'name': repo['name'],
+            'commits': len(repo['commits']),
+            'issues_created': len([i for i in repo['issues'] if start <= datetime.fromisoformat(i['created_at'].replace('Z', '+00:00')) < end]),
+            'issues_closed': len([i for i in repo['issues'] if i.get('closed_at') and start <= datetime.fromisoformat(i['closed_at'].replace('Z', '+00:00')) < end]),
+            'prs_opened': len([pr for pr in repo['pull_requests'] if start <= datetime.fromisoformat(pr['created_at'].replace('Z', '+00:00')) < end]),
+            'prs_merged': len([pr for pr in repo['pull_requests'] if pr.get('merged_at') and start <= datetime.fromisoformat(pr['merged_at'].replace('Z', '+00:00')) < end])
+        })
+    
+    # Read project requirements
+    requirements = read_requirement_pdfs()
+    
+    # Build prompt for Gemini
+    data_summary = f"""GitHub Activity Analysis for Week:
+
+OVERALL METRICS:
+- Total Commits: {total_commits}
+- Issues Created: {total_issues_created}
+- Issues Closed: {total_issues_closed}
+- Pull Requests Opened: {total_prs_opened}
+- Pull Requests Merged: {total_prs_merged}
+- Issue Closure Rate: {(total_issues_closed/total_issues_created*100) if total_issues_created > 0 else 0:.1f}%
+- PR Merge Rate: {(total_prs_merged/total_prs_opened*100) if total_prs_opened > 0 else 0:.1f}%
+
+CONTRIBUTOR DISTRIBUTION:
+{chr(10).join([f"- {name}: {count} commits" for name, count in sorted(contributors.items(), key=lambda x: x[1], reverse=True)])}
+
+ISSUE TYPES:
+{chr(10).join([f"- {itype}: {count}" for itype, count in issue_types.items()])}
+
+REPOSITORY BREAKDOWN:
+{chr(10).join([f"- {r['name']}: {r['commits']} commits, {r['issues_created']} issues created, {r['issues_closed']} closed, {r['prs_opened']} PRs opened, {r['prs_merged']} merged" for r in repo_summary])}
+"""
+    
+    # Add project requirements if available
+    if requirements:
+        data_summary += f"\n\nPROJECT REQUIREMENTS DOCUMENT:\n{requirements[:4000]}"  # Limit to avoid token limits
+
+    # Try to use Gemini AI
+    insights = []
+    recommendations = []
+    
+    if GEMINI_API_KEY:
+        try:
+            genai.configure(api_key=GEMINI_API_KEY)
+            
+            # List available models from the API
+            try:
+                available_models = genai.list_models()
+                model_names = []
+                for m in available_models:
+                    # Only use models that support generateContent
+                    if 'generateContent' in m.supported_generation_methods:
+                        model_names.append(m.name)
+                
+                if model_names:
+                    print(f"  ℹ Found {len(model_names)} available Gemini models")
+                else:
+                    print("  ⚠ No models with generateContent support found")
+            except Exception as e:
+                print(f"  ⚠ Could not list models: {e}")
+                # Fallback to common model names
+                model_names = [
+                    'gemini-1.5-flash-latest',
+                    'gemini-1.5-flash',
+                    'gemini-1.5-pro-latest',
+                    'gemini-pro',
+                    'models/gemini-1.5-flash',
+                    'models/gemini-pro'
+                ]
+            
+            model = None
+            last_error = None
+            
+            for model_name in model_names:
+                try:
+                    model = genai.GenerativeModel(model_name)
+                    # Test the model with a simple prompt
+                    test_response = model.generate_content("Test")
+                    print(f"  ✓ Using Gemini model: {model_name}")
+                    break
+                except Exception as e:
+                    last_error = str(e)[:100]  # Truncate error
+                    continue
+            
+            if not model:
+                raise Exception(f"No working Gemini model found. Last error: {last_error}")
+            
+            # Build context-aware prompt
+            if requirements:
+                prompt = f"""{data_summary}
+
+You are a senior technical project manager analyzing a software project. You have access to:
+1. The PROJECT REQUIREMENTS document above
+2. This week's GitHub activity metrics
+
+Your task:
+1. Compare actual progress against the requirements/timeline
+2. Identify which project phase/milestone the team should be in
+3. Determine if work aligns with project requirements
+4. Provide SPECIFIC, ACTIONABLE recommendations (not generic advice)
+
+Provide:
+
+INSIGHTS (4-6 critical observations):
+- Compare current work to what SHOULD be happening per requirements
+- Identify if team is on track, ahead, or behind schedule
+- Note any missing critical features or milestones
+- Flag work that doesn't align with project requirements
+
+Format: "[Icon] Title|Description" where Icon is "✓" (on track) or "⚠" (concern)
+
+RECOMMENDATIONS (4-6 specific actions):
+- Reference specific features/requirements from the document
+- Suggest concrete next steps based on project phase
+- Prioritize work that's critical per requirements
+- Identify blockers preventing requirement completion
+
+Format exactly as:
+INSIGHTS:
+✓ Title|Description
+⚠ Title|Description
+
+RECOMMENDATIONS:
+- Specific action
+- Specific action
+"""
+            else:
+                # Fallback prompt without requirements
+                prompt = f"""{data_summary}
+
+As a senior software engineering manager, analyze the GitHub activity and provide:
+
+INSIGHTS (4-6 observations): Format as "[Icon] Title|Description" with "✓" or "⚠"
+
+RECOMMENDATIONS (4-6 actions): Specific, actionable recommendations for improvement.
+
+Format exactly as:
+INSIGHTS:
+✓ Title|Description
+⚠ Title|Description
+
+RECOMMENDATIONS:
+- Action
+- Action
+"""
+            
+            # Generate insights with the working model
+            response = model.generate_content(prompt)
+            
+            # Parse AI response
+            text = response.text
+            sections = text.split('RECOMMENDATIONS:')
+            
+            if len(sections) >= 2:
+                # Parse insights
+                insights_text = sections[0].replace('INSIGHTS:', '').strip()
+                for line in insights_text.split('\n'):
+                    line = line.strip()
+                    if line and ('✓' in line or '⚠' in line):
+                        if '|' in line:
+                            parts = line.split('|', 1)
+                            title = parts[0].strip()
+                            desc = parts[1].strip() if len(parts) > 1 else ''
+                            insights.append((title, desc))
+                
+                # Parse recommendations
+                recs_text = sections[1].strip()
+                for line in recs_text.split('\n'):
+                    line = line.strip()
+                    if line.startswith('-'):
+                        recommendations.append(line[1:].strip())
+            
+            print("  ✓ AI insights generated successfully using Gemini")
+            
+        except Exception as e:
+            error_msg = str(e)[:200]  # Truncate long errors
+            print(f"  ⚠ Gemini API error: {error_msg}")
+            print("  ℹ Tip: Get a free API key at https://makersuite.google.com/app/apikey")
+            print("  ℹ Falling back to rule-based analysis")
+            # Fall back to basic analysis
+            insights, recommendations = _fallback_insights(all_data, start, end, total_commits, total_issues_created, total_issues_closed, total_prs_opened, total_prs_merged, contributors, issue_types)
+    else:
+        print("  ℹ No GEMINI_API_KEY found, using rule-based analysis")
+        insights, recommendations = _fallback_insights(all_data, start, end, total_commits, total_issues_created, total_issues_closed, total_prs_opened, total_prs_merged, contributors, issue_types)
+    
+    return insights, recommendations
+
+def _fallback_insights(all_data, start, end, total_commits, total_issues_created, total_issues_closed, total_prs_opened, total_prs_merged, contributors, issue_types):
+    """Fallback rule-based insights when AI is unavailable."""
+    insights = []
+    recommendations = []
+    
+    # Basic analysis
+    active_repos = [r for r in all_data if len(r['commits']) > 0]
+    
+    if len(active_repos) / len(all_data) >= 0.8:
+        insights.append(("✓ High Activity", f"Excellent! {len(active_repos)}/{len(all_data)} repositories show active development."))
+    
+    if total_issues_created > 0:
+        closure_rate = (total_issues_closed / total_issues_created) * 100
+        if closure_rate >= 70:
+            insights.append(("✓ Strong Issue Resolution", f"{closure_rate:.0f}% of issues closed this week."))
+        elif closure_rate < 30:
+            insights.append(("⚠ Growing Backlog", f"Only {closure_rate:.0f}% of issues resolved."))
+    
+    if total_prs_opened > 0:
+        merge_rate = (total_prs_merged / total_prs_opened) * 100
+        if merge_rate >= 80:
+            insights.append(("✓ Efficient PR Process", f"{merge_rate:.0f}% of PRs merged successfully."))
+        elif merge_rate < 40:
+            insights.append(("⚠ PR Bottleneck", f"Only {merge_rate:.0f}% merge rate detected."))
+    
+    if len(contributors) > 0:
+        avg = sum(contributors.values()) / len(contributors)
+        max_commits = max(contributors.values())
+        if max_commits > avg * 3:
+            insights.append(("⚠ Unbalanced Load", "Workload distribution needs review."))
+    
+    # Basic recommendations
+    recommendations.append("Consider implementing CI/CD pipelines for faster deployment cycles.")
+    recommendations.append("Schedule regular code review sessions to maintain quality standards.")
+    recommendations.append("Document architectural decisions for better team alignment.")
+    
+    return insights, recommendations
+
 # --- PDF Generation Function ---
+
+def generate_dashboards(all_data, start, end, chart_colors, heading3_style):
+    """Generate professional, modern charts with premium styling."""
+    elements = []
+
+    # Calculate metrics
+    repo_names = [capitalize_repo_name(r['name']) for r in all_data]
+    commit_counts = [len(r['commits']) for r in all_data]
+    issue_counts = [len([i for i in r['issues'] if start <= datetime.fromisoformat(i['created_at'].replace('Z', '+00:00')) < end]) for r in all_data]
+    pr_counts = [len([p for p in r['pull_requests'] if start <= datetime.fromisoformat(p['created_at'].replace('Z', '+00:00')) < end]) for r in all_data]
+
+    # Professional color palette
+    bar_colors = [
+        colors.HexColor('#3498db'),  # Blue - Commits
+        colors.HexColor('#e74c3c'),  # Red - Issues  
+        colors.HexColor('#2ecc71'),  # Green - PRs
+    ]
+    
+    pie_colors = [
+        colors.HexColor('#3498db'),  # Blue
+        colors.HexColor('#9b59b6'),  # Purple
+        colors.HexColor('#e67e22'),  # Orange
+        colors.HexColor('#1abc9c'),  # Teal
+        colors.HexColor('#f39c12'),  # Yellow
+        colors.HexColor('#e74c3c'),  # Red
+    ]
+
+    # 1. ACTIVITY BY REPOSITORY - Bar Chart
+    elements.append(Paragraph("<b>REPOSITORY ACTIVITY METRICS</b>", heading3_style))
+    elements.append(Spacer(1, 0.2*cm))
+    
+    drawing = Drawing(width=17*cm, height=9*cm)
+    data = [commit_counts, issue_counts, pr_counts]
+    
+    bc = VerticalBarChart()
+    bc.x = 40
+    bc.y = 50
+    bc.height = 180
+    bc.width = 380
+    bc.data = data
+    bc.groupSpacing = 20
+    bc.barSpacing = 4
+    bc.barWidth = 10
+
+    bc.categoryAxis.categoryNames = repo_names
+    bc.categoryAxis.labels.boxAnchor = 'n'
+    bc.categoryAxis.labels.angle = 0
+    bc.categoryAxis.labels.fontSize = 9
+    bc.categoryAxis.labels.dy = -8
+    bc.categoryAxis.labels.fontName = 'Helvetica-Bold'
+    bc.categoryAxis.strokeWidth = 1
+    bc.categoryAxis.strokeColor = colors.HexColor('#34495e')
+    
+    bc.valueAxis.valueMin = 0
+    max_val = max(max(c) for c in data) if any(any(v > 0 for v in c) for c in data) else 1
+    bc.valueAxis.valueMax = max_val + 2
+    bc.valueAxis.valueStep = max(1, max_val // 5)
+    bc.valueAxis.labels.fontSize = 8
+    bc.valueAxis.strokeWidth = 1
+    bc.valueAxis.strokeColor = colors.HexColor('#34495e')
+    bc.valueAxis.gridStart = 40
+    bc.valueAxis.gridEnd = 420
+    bc.valueAxis.gridStrokeColor = colors.HexColor('#ecf0f1')
+    bc.valueAxis.gridStrokeWidth = 0.5
+
+    # Modern bar colors with subtle styling
+    for i, color in enumerate(bar_colors):
+        bc.bars[i].fillColor = color
+        bc.bars[i].strokeColor = colors.white
+        bc.bars[i].strokeWidth = 0.5
+
+    drawing.add(bc)
+
+    # Enhanced legend
+    legend = Legend()
+    legend.x = 430
+    legend.y = 140
+    legend.alignment = 'right'
+    legend.fontSize = 9
+    legend.fontName = 'Helvetica-Bold'
+    legend.columnMaximum = 3
+    legend.dx = 10
+    legend.dy = 10
+    legend.dxTextSpace = 5
+    legend.colorNamePairs = [
+        (bar_colors[0], 'Commits'),
+        (bar_colors[1], 'Issues'),
+        (bar_colors[2], 'Pull Requests')
+    ]
+    drawing.add(legend)
+
+    elements.append(drawing)
+    elements.append(Spacer(1, 0.6*cm))
+
+    # 2. ISSUE & PR BREAKDOWN - Enhanced Pie Charts
+    all_issues = [i for repo in all_data for i in repo['issues'] if start <= datetime.fromisoformat(i['created_at'].replace('Z', '+00:00')) < end]
+    all_prs = [pr for repo in all_data for pr in repo['pull_requests'] if start <= datetime.fromisoformat(pr['created_at'].replace('Z', '+00:00')) < end]
+
+    if all_issues or all_prs:
+        elements.append(Paragraph("<b>ISSUE & PULL REQUEST DISTRIBUTION</b>", heading3_style))
+        elements.append(Spacer(1, 0.2*cm))
+        
+        pie_drawing = Drawing(width=17*cm, height=8*cm)
+        
+        # Issue Types Pie Chart
+        if all_issues:
+            issue_types = defaultdict(int)
+            for issue in all_issues:
+                issue_types[get_issue_type(issue)] += 1
+            
+            # Add title for issue pie
+            from reportlab.graphics.shapes import String
+            title1 = String(140, 220, 'Issue Types', fontSize=10, fontName='Helvetica-Bold', textAnchor='middle')
+            pie_drawing.add(title1)
+            
+            issue_pie = Pie()
+            issue_pie.x = 80
+            issue_pie.y = 80
+            issue_pie.width = 120
+            issue_pie.height = 120
+            issue_pie.data = list(issue_types.values())
+            issue_pie.labels = []
+            issue_pie.slices.strokeWidth = 2
+            issue_pie.slices.strokeColor = colors.white
+            issue_pie.sideLabels = 0
+            
+            for i in range(len(issue_types)):
+                issue_pie.slices[i].fillColor = pie_colors[i % len(pie_colors)]
+                issue_pie.slices[i].popout = 3 if i == 0 else 0
+            
+            pie_drawing.add(issue_pie)
+            
+            # Enhanced legend for issues
+            issue_legend = Legend()
+            issue_legend.x = 15
+            issue_legend.y = 40
+            issue_legend.fontSize = 8
+            issue_legend.fontName = 'Helvetica'
+            issue_legend.columnMaximum = 1
+            issue_legend.dx = 10
+            issue_legend.dy = 10
+            issue_legend.dxTextSpace = 5
+            issue_legend.colorNamePairs = [
+                (pie_colors[i % len(pie_colors)], f"{k}: {v}") 
+                for i, (k, v) in enumerate(issue_types.items())
+            ]
+            pie_drawing.add(issue_legend)
+        
+        # PR Status Pie Chart
+        if all_prs:
+            pr_status = defaultdict(int)
+            for pr in all_prs:
+                if pr.get('merged_at') and start <= datetime.fromisoformat(pr['merged_at'].replace('Z', '+00:00')) < end:
+                    pr_status['Merged'] += 1
+                elif pr['state'] == 'open':
+                    pr_status['Open'] += 1
+                else:
+                    pr_status['Closed'] += 1
+            
+            # Add title for PR pie
+            from reportlab.graphics.shapes import String
+            title2 = String(390, 220, 'Pull Request Status', fontSize=10, fontName='Helvetica-Bold', textAnchor='middle')
+            pie_drawing.add(title2)
+            
+            pr_pie = Pie()
+            pr_pie.x = 330
+            pr_pie.y = 80
+            pr_pie.width = 120
+            pr_pie.height = 120
+            pr_pie.data = list(pr_status.values())
+            pr_pie.labels = []
+            pr_pie.slices.strokeWidth = 2
+            pr_pie.slices.strokeColor = colors.white
+            pr_pie.sideLabels = 0
+            
+            pr_specific_colors = [pie_colors[2], pie_colors[0], pie_colors[1]]  # Green, Blue, Red
+            for i in range(len(pr_status)):
+                pr_pie.slices[i].fillColor = pr_specific_colors[i % len(pr_specific_colors)]
+                pr_pie.slices[i].popout = 3 if i == 0 else 0
+            
+            pie_drawing.add(pr_pie)
+            
+            # Enhanced legend for PRs
+            pr_legend = Legend()
+            pr_legend.x = 265
+            pr_legend.y = 40
+            pr_legend.fontSize = 8
+            pr_legend.fontName = 'Helvetica'
+            pr_legend.columnMaximum = 1
+            pr_legend.dx = 10
+            pr_legend.dy = 10
+            pr_legend.dxTextSpace = 5
+            pr_legend.colorNamePairs = [
+                (pr_specific_colors[i % len(pr_specific_colors)], f"{k}: {v}") 
+                for i, (k, v) in enumerate(pr_status.items())
+            ]
+            pie_drawing.add(pr_legend)
+        
+        elements.append(pie_drawing)
+
+    return elements
 
 def generate_pdf_report(all_data, week_range):
     """Generate a concise, professional PDF report."""
-    from reportlab.lib import colors
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.units import cm
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak, HRFlowable
-    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
-    from reportlab.platypus.flowables import KeepTogether
     
     start, end = week_range
     week_num = end.isocalendar()[1]
@@ -263,32 +766,32 @@ def generate_pdf_report(all_data, week_range):
     elements = []
     styles = getSampleStyleSheet()
     
-    # Professional, subdued color scheme (darker grays, subtle accent)
-    PRIMARY_COLOR = colors.HexColor('#212121') # Dark Gray
-    SECONDARY_COLOR = colors.HexColor('#424242') # Medium Dark Gray
-    ACCENT_COLOR = colors.HexColor('#607D8B') # Blue Grey
-    HEADER_BG = colors.HexColor('#E0E0E0') # Light Gray
-    TABLE_HEADER_COLOR_1 = colors.HexColor('#757575') # Gray 700
-    TABLE_HEADER_COLOR_2 = colors.HexColor('#616161') # Gray 800
+    # Corporate professional color scheme
+    PRIMARY_COLOR = colors.HexColor('#1a1a1a') # Near Black
+    SECONDARY_COLOR = colors.HexColor('#2c3e50') # Dark Blue Gray
+    ACCENT_COLOR = colors.HexColor('#34495e') # Professional Blue
+    HEADER_BG = colors.HexColor('#ecf0f1') # Very Light Gray
+    TABLE_HEADER_COLOR_1 = colors.HexColor('#2c3e50') # Dark Blue Gray
+    TABLE_HEADER_COLOR_2 = colors.HexColor('#34495e') # Professional Blue
     
-    # Custom styles - more compact and formal
+    # Custom styles - very compact and formal
     title_style = ParagraphStyle(
         'CustomTitle',
         parent=styles['Heading1'],
-        fontSize=20, # Reduced
+        fontSize=18,
         textColor=PRIMARY_COLOR,
-        spaceAfter=0.2*cm, # Reduced
+        spaceAfter=0.15*cm,
         alignment=TA_CENTER,
         fontName='Helvetica-Bold',
-        leading=24 # Reduced
+        leading=20
     )
     
     subtitle_style = ParagraphStyle(
         'CustomSubtitle',
         parent=styles['Normal'],
-        fontSize=11, # Reduced
+        fontSize=10,
         textColor=SECONDARY_COLOR,
-        spaceAfter=0.1*cm, # Reduced
+        spaceAfter=0.08*cm,
         alignment=TA_CENTER,
         fontName='Helvetica'
     )
@@ -296,19 +799,19 @@ def generate_pdf_report(all_data, week_range):
     meta_style = ParagraphStyle(
         'MetaInfo',
         parent=styles['Normal'],
-        fontSize=8, # Reduced
-        textColor=colors.HexColor('#757575'),
-        spaceAfter=0.5*cm, # Reduced
+        fontSize=7,
+        textColor=colors.HexColor('#7f8c8d'),
+        spaceAfter=0.4*cm,
         alignment=TA_CENTER
     )
     
     heading2_style = ParagraphStyle(
         'CustomHeading2',
         parent=styles['Heading2'],
-        fontSize=16, # Reduced
+        fontSize=14,
         textColor=PRIMARY_COLOR,
-        spaceAfter=0.5*cm, # Reduced
-        spaceBefore=1.0*cm, # Reduced
+        spaceAfter=0.3*cm,
+        spaceBefore=0.6*cm,
         fontName='Helvetica-Bold',
         leftIndent=0
     )
@@ -316,28 +819,28 @@ def generate_pdf_report(all_data, week_range):
     heading3_style = ParagraphStyle(
         'CustomHeading3',
         parent=styles['Heading3'],
-        fontSize=12, # Reduced
+        fontSize=11,
         textColor=SECONDARY_COLOR,
-        spaceAfter=0.3*cm, # Reduced
-        spaceBefore=0.8*cm, # Reduced
+        spaceAfter=0.2*cm,
+        spaceBefore=0.4*cm,
         fontName='Helvetica-Bold'
     )
     
     body_style = ParagraphStyle(
         'BodyText',
         parent=styles['Normal'],
-        fontSize=9, # Reduced
-        textColor=colors.HexColor('#212121'),
+        fontSize=8,
+        textColor=colors.HexColor('#2c3e50'),
         alignment=TA_JUSTIFY,
-        spaceAfter=0.2*cm, # Reduced
-        leading=11 # Reduced
+        spaceAfter=0.15*cm,
+        leading=10
     )
 
     table_cell_style_small = ParagraphStyle(
         'TableCellSmall',
         parent=styles['Normal'],
-        fontSize=7, # Very small for detail
-        leading=8,
+        fontSize=6.5,
+        leading=7.5,
         alignment=TA_LEFT,
         textColor=PRIMARY_COLOR,
     )
@@ -357,6 +860,13 @@ def generate_pdf_report(all_data, week_range):
     elements.append(Spacer(1, 0.3*cm))
     elements.append(Paragraph(f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}", meta_style))
     
+    # Add note about clickable elements
+    clickable_note = Paragraph(
+        "<i><b>Note:</b> Click on repository names, issue/PR numbers, usernames, and commit SHAs to navigate directly to GitHub</i>", 
+        ParagraphStyle('ClickableNote', parent=meta_style, fontSize=8, textColor=colors.HexColor('#3498db'))
+    )
+    elements.append(clickable_note)
+    
     elements.append(PageBreak())
     
     # --- Executive Summary ---
@@ -375,7 +885,7 @@ def generate_pdf_report(all_data, week_range):
     elements.append(Paragraph("EXECUTIVE SUMMARY", heading2_style))
     elements.append(HRFlowable(width="100%", thickness=0.7, color=ACCENT_COLOR, spaceAfter=0.5*cm, spaceBefore=0))
     
-    summary_text = f"""This report provides a concise analysis of development activity for the Social Network project 
+    summary_text = f"""This report provides a concise analysis of development activity for the <link href='https://github.com/{ORG_NAME}'>{ORG_NAME}</link> Social Network project 
     across all relevant repositories for Week {week_num} of {year} ({format_date(start)} - {format_date(end - timedelta(days=1))}). 
     Key metrics include code commits, issue resolution, and pull request workflows. During this period, 
     the team collectively made {total_commits} commits and processed a net change of 
@@ -421,6 +931,15 @@ def generate_pdf_report(all_data, week_range):
     
     elements.append(summary_table)
     elements.append(PageBreak())
+
+    # --- Project Dashboards ---
+    elements.append(Paragraph("PROJECT DASHBOARDS", heading2_style))
+    elements.append(HRFlowable(width="100%", thickness=0.7, color=ACCENT_COLOR, spaceAfter=0.5*cm, spaceBefore=0))
+
+    dashboard_elements = generate_dashboards(all_data, start, end, [PRIMARY_COLOR, SECONDARY_COLOR, ACCENT_COLOR, colors.HexColor('#7f8c8d')], heading3_style)
+    elements.extend(dashboard_elements)
+    
+    elements.append(PageBreak())
     
     # --- Repository-by-Repository Analysis ---
     for repo_data in all_data:
@@ -441,7 +960,7 @@ def generate_pdf_report(all_data, week_range):
         
         # Use KeepTogether to ensure heading and intro paragraph stay on same page
         repo_section_elements = []
-        repo_section_elements.append(Paragraph(f"REPOSITORY: {capitalize_repo_name(repo_name).upper()}", heading2_style))
+        repo_section_elements.append(Paragraph(f"REPOSITORY: <link href='https://github.com/{ORG_NAME}/{repo_name}'>{capitalize_repo_name(repo_name).upper()}</link>", heading2_style))
         repo_section_elements.append(HRFlowable(width="100%", thickness=0.7, color=ACCENT_COLOR, spaceAfter=0.5*cm, spaceBefore=0))
         
         if not has_activity:
@@ -525,7 +1044,7 @@ def generate_pdf_report(all_data, week_range):
                     msgs_str += f'<br/><i>...and {len(author_commits) - 3} more commits</i>'
                 
                 commit_data.append([
-                    Paragraph(author, table_cell_style_small),
+                    Paragraph(f"<link href='{commit.get('author', {}).get('html_url', '#') if commit.get('author') else '#'}'>{author}</link>", table_cell_style_small),
                     str(len(author_commits)),
                     Paragraph(msgs_str, ParagraphStyle('SmallCommit', parent=table_cell_style_small, fontSize=6.5, leading=7.5)) # Smaller text for commit messages
                 ])
@@ -571,7 +1090,7 @@ def generate_pdf_report(all_data, week_range):
                     Paragraph(title, table_cell_style_small),
                     Paragraph(get_issue_type(issue), table_cell_style_small),
                     Paragraph(get_priority(issue), table_cell_style_small),
-                    Paragraph(issue.get('user', {}).get('login', 'N/A')[:12], table_cell_style_small),
+                    Paragraph(f"<link href='{issue.get('user', {}).get('html_url', '#')}'>{issue.get('user', {}).get('login', 'N/A')[:12]}</link>", table_cell_style_small),
                     Paragraph(assignees, table_cell_style_small),
                     Paragraph(status, table_cell_style_small),
                     Paragraph(issue['created_at'][:10], table_cell_style_small)
@@ -615,7 +1134,7 @@ def generate_pdf_report(all_data, week_range):
                     Paragraph(f"<link href='{issue_url}'>#{issue['number']}</link>", table_cell_style_small),
                     Paragraph(title, table_cell_style_small),
                     Paragraph(get_issue_type(issue), table_cell_style_small),
-                    Paragraph(closed_by[:15], table_cell_style_small),
+                    Paragraph(f"<link href='{issue.get('closed_by', {}).get('html_url', '#') if issue.get('closed_by') else '#'}'>{closed_by[:15]}</link>", table_cell_style_small),
                     Paragraph(format_timedelta(calculate_time_to_close(issue)), table_cell_style_small),
                     Paragraph(issue['closed_at'][:10], table_cell_style_small)
                 ])
@@ -643,13 +1162,13 @@ def generate_pdf_report(all_data, week_range):
             
             elements.append(KeepTogether([closed_table, Spacer(1, 0.3*cm)]))
         
-        # Pull Requests Analysis - Opened
         if prs_opened:
-            elements.append(Paragraph("Pull Requests Opened This Week", heading3_style))
+            prs_opened_section = []
+            prs_opened_section.append(Paragraph("Pull Requests Opened This Week", heading3_style))
             
             prs_data = [['#', 'TITLE', 'AUTHOR', 'STATUS', 'CHANGES', 'REVIEWERS', 'CREATED']]
             for pr in sorted(prs_opened, key=lambda x: x['number'], reverse=True):
-                title = pr['title'][:40] + '...' if len(pr['title']) > 40 else pr['title']
+                title = pr['title'][:38] + '...' if len(pr['title']) > 38 else pr['title']
                 
                 if pr.get('merged_at'):
                     status = 'MERGED'
@@ -662,7 +1181,7 @@ def generate_pdf_report(all_data, week_range):
                 
                 reviewers = []
                 if pr.get('requested_reviewers'):
-                    reviewers = [r['login'] for r in pr['requested_reviewers'][:1]] # Fewer reviewers for display
+                    reviewers = [r['login'] for r in pr['requested_reviewers'][:1]]
                 reviewers_str = ', '.join(reviewers) if reviewers else 'None'
                 if len(pr.get('requested_reviewers', [])) > 1:
                     reviewers_str += f' +{len(pr.get("requested_reviewers", [])) - 1}'
@@ -672,15 +1191,14 @@ def generate_pdf_report(all_data, week_range):
                 prs_data.append([
                     Paragraph(f"<link href='{pr_url}'>#{pr['number']}</link>", table_cell_style_small),
                     Paragraph(title, table_cell_style_small),
-                    Paragraph(pr.get('user', {}).get('login', 'N/A')[:12], table_cell_style_small),
+                    Paragraph(f"<link href='{pr.get('user', {}).get('html_url', '#')}'>{pr.get('user', {}).get('login', 'N/A')[:12]}</link>", table_cell_style_small),
                     Paragraph(status, table_cell_style_small),
                     Paragraph(changes, table_cell_style_small),
                     Paragraph(reviewers_str, table_cell_style_small),
                     Paragraph(pr['created_at'][:10], table_cell_style_small)
                 ])
             
-            # Adjusted colWidths for compactness
-            prs_table = Table(prs_data, colWidths=[1.5*cm, 4.8*cm, 2.3*cm, 1.8*cm, 2*cm, 2.7*cm, 2.2*cm])
+            prs_table = Table(prs_data, colWidths=[1.2*cm, 4.8*cm, 2.3*cm, 1.8*cm, 2*cm, 2.7*cm, 2.2*cm])
             prs_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), TABLE_HEADER_COLOR_2),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
@@ -689,42 +1207,43 @@ def generate_pdf_report(all_data, week_range):
                 ('ALIGN', (4, 0), (4, -1), 'CENTER'),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                 ('FONTSIZE', (0, 0), (-1, 0), 8),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 7),
-                ('TOPPADDING', (0, 0), (-1, 0), 7),
-                ('GRID', (0, 0), (-1, -1), 0.25, colors.HexColor('#CCCCCC')),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
+                ('TOPPADDING', (0, 0), (-1, 0), 5),
+                ('GRID', (0, 0), (-1, -1), 0.25, colors.HexColor('#bdc3c7')),
                 ('FONTSIZE', (0, 1), (-1, -1), 7),
                 ('ROWBACKGROUNDS', (0, 1), (-1, -1), [HEADER_BG, colors.white]),
-                ('TOPPADDING', (0, 1), (-1, -1), 5),
-                ('BOTTOMPADDING', (0, 1), (-1, -1), 5),
+                ('TOPPADDING', (0, 1), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 4),
                 ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                 ('LEFTPADDING', (0, 0), (-1, -1), 2),
                 ('RIGHTPADDING', (0, 0), (-1, -1), 2),
             ]))
             
-            elements.append(KeepTogether([prs_table, Spacer(1, 0.3*cm)]))
+            prs_opened_section.append(prs_table)
+            prs_opened_section.append(Spacer(1, 0.3*cm))
+            elements.append(KeepTogether(prs_opened_section))
         
-        # Merged PRs Detail
         if prs_merged:
-            elements.append(Paragraph("Pull Requests Merged This Week", heading3_style))
+            prs_merged_section = []
+            prs_merged_section.append(Paragraph("Pull Requests Merged This Week", heading3_style))
             
             merged_data = [['#', 'TITLE', 'AUTHOR', 'MERGED BY', 'LINES CHANGED', 'MERGED DATE']]
             for pr in sorted(prs_merged, key=lambda x: x['merged_at'] if x.get('merged_at') else '', reverse=True):
-                title = pr['title'][:45] + '...' if len(pr['title']) > 45 else pr['title']
+                title = pr['title'][:40] + '...' if len(pr['title']) > 40 else pr['title']
                 merged_by = pr.get('merged_by', {}).get('login', 'N/A') if pr.get('merged_by') else pr.get('user', {}).get('login', 'N/A')
-                lines_changed = f"+{pr.get('additions', 0)} -{pr.get('deletions', 0)}"
+                lines_changed = f"+{pr.get('additions', 0)}/-{pr.get('deletions', 0)}"
                 pr_url = pr.get('html_url', '#')
 
                 merged_data.append([
                     Paragraph(f"<link href='{pr_url}'>#{pr['number']}</link>", table_cell_style_small),
                     Paragraph(title, table_cell_style_small),
-                    Paragraph(pr.get('user', {}).get('login', 'N/A')[:12], table_cell_style_small),
-                    Paragraph(merged_by[:12], table_cell_style_small),
+                    Paragraph(f"<link href='{pr.get('user', {}).get('html_url', '#')}'>{pr.get('user', {}).get('login', 'N/A')[:12]}</link>", table_cell_style_small),
+                    Paragraph(f"<link href='{pr.get('merged_by', {}).get('html_url', '#') if pr.get('merged_by') else pr.get('user', {}).get('html_url', '#')}'>{merged_by[:12]}</link>", table_cell_style_small),
                     Paragraph(lines_changed, table_cell_style_small),
                     Paragraph(pr['merged_at'][:10] if pr.get('merged_at') else 'N/A', table_cell_style_small)
                 ])
             
-            # Adjusted colWidths for compactness
-            merged_table = Table(merged_data, colWidths=[1.5*cm, 5.5*cm, 2.5*cm, 2.5*cm, 2.5*cm, 2.5*cm])
+            merged_table = Table(merged_data, colWidths=[1.2*cm, 5.8*cm, 2.5*cm, 2.5*cm, 2.5*cm, 2.5*cm])
             merged_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), TABLE_HEADER_COLOR_2),
                 ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
@@ -733,21 +1252,97 @@ def generate_pdf_report(all_data, week_range):
                 ('ALIGN', (4, 0), (4, -1), 'CENTER'),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                 ('FONTSIZE', (0, 0), (-1, 0), 8),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 7),
-                ('TOPPADDING', (0, 0), (-1, 0), 7),
-                ('GRID', (0, 0), (-1, -1), 0.25, colors.HexColor('#CCCCCC')),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
+                ('TOPPADDING', (0, 0), (-1, 0), 5),
+                ('GRID', (0, 0), (-1, -1), 0.25, colors.HexColor('#bdc3c7')),
                 ('FONTSIZE', (0, 1), (-1, -1), 7),
                 ('ROWBACKGROUNDS', (0, 1), (-1, -1), [HEADER_BG, colors.white]),
-                ('TOPPADDING', (0, 1), (-1, -1), 5),
-                ('BOTTOMPADDING', (0, 1), (-1, -1), 5),
+                ('TOPPADDING', (0, 1), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 4),
                 ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                 ('LEFTPADDING', (0, 0), (-1, -1), 2),
                 ('RIGHTPADDING', (0, 0), (-1, -1), 2),
             ]))
             
-            elements.append(KeepTogether([merged_table, Spacer(1, 0.3*cm)]))
+            prs_merged_section.append(merged_table)
+            prs_merged_section.append(Spacer(1, 0.3*cm))
+            elements.append(KeepTogether(prs_merged_section))
         
         elements.append(PageBreak())
+    
+    # --- AI-Powered Insights & Recommendations ---
+    elements.append(Paragraph("AI-POWERED INSIGHTS & RECOMMENDATIONS", heading2_style))
+    elements.append(HRFlowable(width="100%", thickness=0.7, color=ACCENT_COLOR, spaceAfter=0.5*cm, spaceBefore=0))
+    
+    insights, recommendations = generate_ai_insights(all_data, start, end)
+    
+    # Insights section
+    if insights:
+        elements.append(Paragraph("Key Insights", heading3_style))
+        intro_text = "Our AI analysis has identified the following patterns and observations from this week's activity:"
+        elements.append(Paragraph(intro_text, body_style))
+        elements.append(Spacer(1, 0.2*cm))
+        
+        insights_data = [['STATUS', 'INSIGHT']]
+        for title, description in insights:
+            insights_data.append([
+                Paragraph(f"<b>{title}</b>", table_cell_style_small),
+                Paragraph(description, table_cell_style_small)
+            ])
+        
+        insights_table = Table(insights_data, colWidths=[4*cm, 13*cm])
+        insights_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), TABLE_HEADER_COLOR_1),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 7),
+            ('TOPPADDING', (0, 0), (-1, 0), 7),
+            ('GRID', (0, 0), (-1, -1), 0.25, colors.HexColor('#CCCCCC')),
+            ('FONTSIZE', (0, 1), (-1, -1), 7),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [HEADER_BG, colors.white]),
+            ('TOPPADDING', (0, 1), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ]))
+        elements.append(insights_table)
+        elements.append(Spacer(1, 0.4*cm))
+    
+    # Recommendations section
+    if recommendations:
+        elements.append(Paragraph("Actionable Recommendations", heading3_style))
+        rec_text = "Based on the analysis above, here are strategic recommendations to improve team productivity and code quality:"
+        elements.append(Paragraph(rec_text, body_style))
+        elements.append(Spacer(1, 0.2*cm))
+        
+        rec_data = [['#', 'RECOMMENDATION']]
+        for idx, rec in enumerate(recommendations, 1):
+            rec_data.append([
+                Paragraph(f"<b>{idx}</b>", table_cell_style_small),
+                Paragraph(rec, table_cell_style_small)
+            ])
+        
+        rec_table = Table(rec_data, colWidths=[1*cm, 16*cm])
+        rec_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), TABLE_HEADER_COLOR_2),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (0, -1), 'CENTER'),
+            ('ALIGN', (1, 0), (1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 7),
+            ('TOPPADDING', (0, 0), (-1, 0), 7),
+            ('GRID', (0, 0), (-1, -1), 0.25, colors.HexColor('#CCCCCC')),
+            ('FONTSIZE', (0, 1), (-1, -1), 7),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [HEADER_BG, colors.white]),
+            ('TOPPADDING', (0, 1), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ]))
+        elements.append(rec_table)
+    
+    elements.append(PageBreak())
     
     # --- Team Performance Analysis ---
     elements.append(Paragraph("TEAM PERFORMANCE ANALYSIS", heading2_style))
@@ -822,7 +1417,7 @@ def generate_pdf_report(all_data, week_range):
             repos_str = repos_str[:27] + '...' # Truncate for display
         
         team_data.append([
-            Paragraph(member[:18], table_cell_style_small),
+            Paragraph(f"<link href='https://github.com/{member}'>{member[:18]}</link>", table_cell_style_small),
             str(stats['commits']),
             str(stats['issues_created']),
             str(stats['issues_closed']),
@@ -841,14 +1436,14 @@ def generate_pdf_report(all_data, week_range):
         ('ALIGN', (0, 0), (0, -1), 'LEFT'),
         ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 8),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 7),
-        ('TOPPADDING', (0, 0), (-1, 0), 7),
-        ('GRID', (0, 0), (-1, -1), 0.25, colors.HexColor('#CCCCCC')),
-        ('FONTSIZE', (0, 1), (-1, -1), 7),
+        ('FONTSIZE', (0, 0), (-1, 0), 7),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
+        ('TOPPADDING', (0, 0), (-1, 0), 5),
+        ('GRID', (0, 0), (-1, -1), 0.25, colors.HexColor('#bdc3c7')),
+        ('FONTSIZE', (0, 1), (-1, -1), 6.5),
         ('ROWBACKGROUNDS', (0, 1), (-1, -1), [HEADER_BG, colors.white]),
-        ('TOPPADDING', (0, 1), (-1, -1), 5),
-        ('BOTTOMPADDING', (0, 1), (-1, -1), 5),
+        ('TOPPADDING', (0, 1), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 1), (-1, -1), 4),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('LEFTPADDING', (0, 0), (-1, -1), 2),
         ('RIGHTPADDING', (0, 0), (-1, -1), 2),
@@ -856,107 +1451,10 @@ def generate_pdf_report(all_data, week_range):
     
     elements.append(KeepTogether([team_table, Spacer(1, 0.5*cm)]))
     
-    # --- Project Health Metrics ---
-    elements.append(PageBreak())
-    elements.append(Paragraph("PROJECT HEALTH METRICS", heading2_style))
-    elements.append(HRFlowable(width="100%", thickness=0.7, color=ACCENT_COLOR, spaceAfter=0.5*cm, spaceBefore=0))
-    
-    health_text = """The following metrics provide insights into project health, highlighting potential areas 
-    for attention. Regular monitoring of these indicators is crucial for maintaining development velocity and code quality."""
-    
-    elements.append(Paragraph(health_text, body_style))
-    elements.append(Spacer(1, 0.3*cm))
-    
-    all_open_issues = [i for repo in all_data for i in repo['issues'] if i['state'] == 'open']
-    blocked_issues = [i for i in all_open_issues if any('block' in l['name'].lower() or 'waiting' in l['name'].lower() for l in i.get('labels', []))]
-    unassigned_issues = [i for i in all_open_issues if not i.get('assignees')]
-    high_priority_open = [i for i in all_open_issues if any(p in l['name'].lower() for l in i.get('labels', []) for p in ['critical', 'high', 'p0', 'p1'])]
-    
-    open_prs = [pr for repo in all_data for pr in repo['pull_requests'] if pr['state'] == 'open' and not pr.get('merged_at')] # Only truly open, not merged but still 'open' state
-    stale_prs = [pr for pr in open_prs if (datetime.now(timezone.utc) - datetime.fromisoformat(pr['updated_at'].replace('Z', '+00:00'))).days > 7]
-    
-    def get_health_status(value, thresholds):
-        # thresholds = (Good_max, Acceptable_max)
-        if value <= thresholds[0]:
-            return 'HEALTHY', colors.HexColor('#2E7D32') # Dark Green
-        elif value <= thresholds[1]:
-            return 'CAUTION', colors.HexColor('#FFB300') # Amber
-        else:
-            return 'CRITICAL', colors.HexColor('#D32F2F') # Dark Red
-    
-    health_metrics_data = [
-        ('Total Open Issues', len(all_open_issues), (15, 25), 'Issues awaiting resolution'),
-        ('Blocked Issues', len(blocked_issues), (1, 3), 'Issues with blockers or dependencies'), # Adjusted thresholds
-        ('Unassigned Issues', len(unassigned_issues), (2, 5), 'Issues without assigned developers'), # Adjusted thresholds
-        ('High Priority Open', len(high_priority_open), (1, 3), 'Critical/high priority unresolved'), # Adjusted thresholds
-        ('Open Pull Requests', len(open_prs), (8, 15), 'PRs awaiting review/merge'),
-        ('Stale PRs (>7 days)', len(stale_prs), (1, 3), 'PRs without recent activity'), # Adjusted thresholds
-    ]
-    
-    health_data = [['METRIC', 'VALUE', 'STATUS', 'ASSESSMENT']]
-    health_status_colors = []
-    
-    for metric_name, value, thresholds, assessment in health_metrics_data:
-        status_text, status_color = get_health_status(value, thresholds)
-        health_data.append([metric_name, str(value), status_text, assessment])
-        health_status_colors.append(status_color)
-    
-    health_table = Table(health_data, colWidths=[4*cm, 2*cm, 2.5*cm, 8.5*cm]) # Adjusted widths
-    
-    health_style = [
-        ('BACKGROUND', (0, 0), (-1, 0), PRIMARY_COLOR),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('ALIGN', (1, 0), (2, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 9),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-        ('TOPPADDING', (0, 0), (-1, 0), 8),
-        ('GRID', (0, 0), (-1, -1), 0.25, colors.HexColor('#CCCCCC')),
-        ('FONTSIZE', (0, 1), (-1, -1), 8),
-        ('TOPPADDING', (0, 1), (-1, -1), 6),
-        ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('FONTNAME', (2, 1), (2, -1), 'Helvetica-Bold'),
-    ]
-    
-    for i, status_color in enumerate(health_status_colors, 1):
-        health_style.append(('BACKGROUND', (2, i), (2, i), status_color))
-        health_style.append(('TEXTCOLOR', (2, i), (2, i), colors.white))
-    
-    health_table.setStyle(TableStyle(health_style))
-    
-    elements.append(KeepTogether([health_table, Spacer(1, 0.5*cm)]))
-    
-    # Recommendations section
-    elements.append(Paragraph("Recommendations & Action Items", heading3_style))
-    
-    recommendations = []
-    if len(blocked_issues) > health_metrics_data[1][2][0]: # Check against healthy threshold
-        recommendations.append(f"• Prioritize resolving {len(blocked_issues)} blocked issue(s) to unblock dependent tasks.")
-    if len(unassigned_issues) > health_metrics_data[2][2][0]:
-        recommendations.append(f"• Assign owners to {len(unassigned_issues)} unassigned issues to ensure accountability.")
-    if len(high_priority_open) > health_metrics_data[3][2][0]:
-        recommendations.append(f"• Expedite resolution of {len(high_priority_open)} high-priority open issues.")
-    if len(stale_prs) > health_metrics_data[5][2][0]:
-        recommendations.append(f"• Conduct timely reviews and action {len(stale_prs)} stale pull request(s) to maintain development flow.")
-    if total_prs_opened > 0 and total_prs_merged / total_prs_opened < 0.7: # Custom threshold for merge rate
-        recommendations.append(f"• Improve PR merge rate (currently {total_prs_merged/total_prs_opened*100:.0f}%) through faster reviews and smaller PRs.")
-    if total_commits == 0 and total_issues_created == 0 and total_prs_opened == 0:
-        recommendations.append("• Overall project activity is low; assess team focus and potential roadblocks.")
-    
-    if not recommendations:
-        recommendations.append("• Project health metrics are generally within acceptable ranges. Continue current practices.")
-    
-    for rec in recommendations:
-        elements.append(Paragraph(rec, body_style))
-    
-    elements.append(Spacer(1, 0.5*cm))
-    
     # --- Footer ---
     elements.append(Spacer(1, 1*cm))
     footer_text = f"""<i>This automated report was generated on {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} 
-    for the <b>{ORG_NAME}</b> Social Network Project. Data covers Week {week_num} of {year} 
+    for the <link href='https://github.com/{ORG_NAME}'><b>{ORG_NAME}</b></link> Social Network Project. Data covers Week {week_num} of {year} 
     ({format_date(start)} through {format_date(end - timedelta(days=1))}).
     </i>"""
     elements.append(Paragraph(footer_text, meta_style))
