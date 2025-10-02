@@ -59,7 +59,19 @@ def fetch_commits(repo, since, until):
     }
     print(f"  📝 Fetching commits...")
     commits = github_api_get(url, params)
-    return commits if isinstance(commits, list) else []
+    
+    # Fetch detailed stats for each commit
+    detailed_commits = []
+    for commit in commits if isinstance(commits, list) else []:
+        commit_sha = commit.get('sha')
+        if commit_sha:
+            # Get full commit details including stats
+            detail_url = f'https://api.github.com/repos/{ORG_NAME}/{repo}/commits/{commit_sha}'
+            detailed_commit = github_api_get(detail_url)
+            if detailed_commit:
+                detailed_commits.append(detailed_commit)
+    
+    return detailed_commits
 
 def fetch_pull_requests(repo, since):
     """Fetch pull requests for a repository"""
@@ -148,6 +160,48 @@ def fetch_projects(repo):
     
     return projects_data
 
+def fetch_code_frequency(repo):
+    """Fetch code frequency stats (additions/deletions over time)"""
+    url = f'https://api.github.com/repos/{ORG_NAME}/{repo}/stats/code_frequency'
+    print(f"  📊 Fetching code frequency...")
+    return github_api_get(url)
+
+def fetch_commit_activity(repo):
+    """Fetch commit activity stats"""
+    url = f'https://api.github.com/repos/{ORG_NAME}/{repo}/stats/commit_activity'
+    print(f"  📈 Fetching commit activity...")
+    return github_api_get(url)
+
+def fetch_contributors_stats(repo):
+    """Fetch detailed contributor statistics"""
+    url = f'https://api.github.com/repos/{ORG_NAME}/{repo}/stats/contributors'
+    print(f"  👥 Fetching contributor stats...")
+    return github_api_get(url)
+
+def fetch_pr_reviews(repo, pr_number):
+    """Fetch reviews for a specific pull request"""
+    url = f'https://api.github.com/repos/{ORG_NAME}/{repo}/pulls/{pr_number}/reviews'
+    reviews = github_api_get(url)
+    return reviews if isinstance(reviews, list) else []
+
+def fetch_pr_comments(repo, pr_number):
+    """Fetch review comments for a specific pull request"""
+    url = f'https://api.github.com/repos/{ORG_NAME}/{repo}/pulls/{pr_number}/comments'
+    comments = github_api_get(url)
+    return comments if isinstance(comments, list) else []
+
+def fetch_issue_comments(repo, issue_number):
+    """Fetch comments for a specific issue"""
+    url = f'https://api.github.com/repos/{ORG_NAME}/{repo}/issues/{issue_number}/comments'
+    comments = github_api_get(url)
+    return comments if isinstance(comments, list) else []
+
+def fetch_repo_languages(repo):
+    """Fetch programming languages used in the repository"""
+    url = f'https://api.github.com/repos/{ORG_NAME}/{repo}/languages'
+    print(f"  💻 Fetching languages...")
+    return github_api_get(url)
+
 def aggregate_detailed_contributors(commits, pull_requests, issues, repo_name):
     """Aggregate detailed contribution statistics by contributor"""
     contributors = defaultdict(lambda: {
@@ -155,10 +209,13 @@ def aggregate_detailed_contributors(commits, pull_requests, issues, repo_name):
         'prs_created': [],
         'prs_merged': [],
         'prs_reviewed': [],
+        'pr_comments': [],
         'issues_created': [],
         'issues_closed': [],
+        'issue_comments': [],
         'total_additions': 0,
         'total_deletions': 0,
+        'files_changed': 0,
         'repos': set()
     })
     
@@ -168,17 +225,24 @@ def aggregate_detailed_contributors(commits, pull_requests, issues, repo_name):
             author_name = commit['commit']['author']['name']
             author_email = commit['commit']['author'].get('email', 'unknown')
             
+            # Get files changed
+            files_changed = len(commit.get('files', []))
+            
             commit_data = {
                 'sha': commit['sha'][:7],
                 'message': commit['commit']['message'].split('\n')[0][:80],
                 'date': commit['commit']['author'].get('date', 'unknown'),
-                'url': commit.get('html_url', '')
+                'url': commit.get('html_url', ''),
+                'additions': commit.get('stats', {}).get('additions', 0),
+                'deletions': commit.get('stats', {}).get('deletions', 0),
+                'files': files_changed
             }
             
             # Get commit stats if available
             if 'stats' in commit:
                 contributors[author_name]['total_additions'] += commit['stats'].get('additions', 0)
                 contributors[author_name]['total_deletions'] += commit['stats'].get('deletions', 0)
+                contributors[author_name]['files_changed'] += files_changed
             
             contributors[author_name]['commits'].append(commit_data)
             contributors[author_name]['repos'].add(repo_name)
@@ -188,13 +252,24 @@ def aggregate_detailed_contributors(commits, pull_requests, issues, repo_name):
         # PR Creator
         if pr.get('user'):
             creator = pr['user'].get('login', 'unknown')
+            
+            # Fetch PR reviews and comments
+            reviews = fetch_pr_reviews(repo_name, pr['number'])
+            comments = fetch_pr_comments(repo_name, pr['number'])
+            
             pr_data = {
                 'number': pr['number'],
                 'title': pr['title'],
                 'state': pr['state'],
                 'url': pr['html_url'],
                 'created_at': pr.get('created_at', 'unknown'),
-                'merged_at': pr.get('merged_at')
+                'merged_at': pr.get('merged_at'),
+                'additions': pr.get('additions', 0),
+                'deletions': pr.get('deletions', 0),
+                'changed_files': pr.get('changed_files', 0),
+                'commits': pr.get('commits', 0),
+                'comments': len(comments),
+                'reviews': len(reviews)
             }
             
             contributors[creator]['prs_created'].append(pr_data)
@@ -203,17 +278,49 @@ def aggregate_detailed_contributors(commits, pull_requests, issues, repo_name):
             # Track merged PRs
             if pr.get('merged_at'):
                 contributors[creator]['prs_merged'].append(pr_data)
+            
+            # Process reviews (who reviewed this PR)
+            for review in reviews:
+                if review.get('user'):
+                    reviewer = review['user'].get('login', 'unknown')
+                    review_data = {
+                        'pr_number': pr['number'],
+                        'pr_title': pr['title'],
+                        'state': review.get('state', 'unknown'),
+                        'submitted_at': review.get('submitted_at', 'unknown')
+                    }
+                    contributors[reviewer]['prs_reviewed'].append(review_data)
+                    contributors[reviewer]['repos'].add(repo_name)
+            
+            # Process PR comments
+            for comment in comments:
+                if comment.get('user'):
+                    commenter = comment['user'].get('login', 'unknown')
+                    comment_data = {
+                        'pr_number': pr['number'],
+                        'body': comment.get('body', '')[:100],
+                        'created_at': comment.get('created_at', 'unknown')
+                    }
+                    contributors[commenter]['pr_comments'].append(comment_data)
+                    contributors[commenter]['repos'].add(repo_name)
     
     # Process issues
     for issue in issues:
         if issue.get('user'):
             creator = issue['user'].get('login', 'unknown')
+            
+            # Fetch issue comments
+            comments = fetch_issue_comments(repo_name, issue['number'])
+            
             issue_data = {
                 'number': issue['number'],
                 'title': issue['title'],
                 'state': issue['state'],
                 'url': issue['html_url'],
-                'created_at': issue.get('created_at', 'unknown')
+                'created_at': issue.get('created_at', 'unknown'),
+                'closed_at': issue.get('closed_at'),
+                'comments': len(comments),
+                'labels': [label['name'] for label in issue.get('labels', [])]
             }
             
             contributors[creator]['issues_created'].append(issue_data)
@@ -222,6 +329,18 @@ def aggregate_detailed_contributors(commits, pull_requests, issues, repo_name):
             # Track closed issues
             if issue.get('closed_at'):
                 contributors[creator]['issues_closed'].append(issue_data)
+            
+            # Process issue comments
+            for comment in comments:
+                if comment.get('user'):
+                    commenter = comment['user'].get('login', 'unknown')
+                    comment_data = {
+                        'issue_number': issue['number'],
+                        'body': comment.get('body', '')[:100],
+                        'created_at': comment.get('created_at', 'unknown')
+                    }
+                    contributors[commenter]['issue_comments'].append(comment_data)
+                    contributors[commenter]['repos'].add(repo_name)
     
     return dict(contributors)
 
@@ -306,6 +425,16 @@ def generate_markdown(all_data, week_range):
             f"| Issues | {issues_created} created, {issues_closed} closed |\n\n"
         ])
         
+        # Language breakdown
+        if repo_data['languages']:
+            md.append("**💻 Languages Used:**\n\n")
+            total_bytes = sum(repo_data['languages'].values())
+            sorted_langs = sorted(repo_data['languages'].items(), key=lambda x: x[1], reverse=True)
+            for lang, bytes_count in sorted_langs[:5]:  # Top 5 languages
+                percentage = (bytes_count / total_bytes * 100) if total_bytes > 0 else 0
+                md.append(f"- {lang}: {percentage:.1f}% ({bytes_count:,} bytes)\n")
+            md.append("\n")
+        
         # Detailed Commit Log
         if repo_data['commits']:
             md.append("**📝 Commit History:**\n\n")
@@ -369,11 +498,15 @@ def generate_markdown(all_data, week_range):
         'commits': 0,
         'prs_created': 0,
         'prs_merged': 0,
+        'prs_reviewed': 0,
+        'pr_comments': 0,
         'issues_created': 0,
         'issues_closed': 0,
+        'issue_comments': 0,
         'repos': set(),
         'additions': 0,
-        'deletions': 0
+        'deletions': 0,
+        'files_changed': 0
     })
     
     detailed_activities = defaultdict(lambda: defaultdict(list))
@@ -390,11 +523,15 @@ def generate_markdown(all_data, week_range):
             all_contributors[name]['commits'] += len(stats['commits'])
             all_contributors[name]['prs_created'] += len(stats['prs_created'])
             all_contributors[name]['prs_merged'] += len(stats['prs_merged'])
+            all_contributors[name]['prs_reviewed'] += len(stats['prs_reviewed'])
+            all_contributors[name]['pr_comments'] += len(stats['pr_comments'])
             all_contributors[name]['issues_created'] += len(stats['issues_created'])
             all_contributors[name]['issues_closed'] += len(stats['issues_closed'])
+            all_contributors[name]['issue_comments'] += len(stats['issue_comments'])
             all_contributors[name]['repos'].update(stats['repos'])
             all_contributors[name]['additions'] += stats['total_additions']
             all_contributors[name]['deletions'] += stats['total_deletions']
+            all_contributors[name]['files_changed'] += stats['files_changed']
             
             # Store detailed activities
             detailed_activities[name][repo_data['name']].extend(stats['commits'])
@@ -408,16 +545,18 @@ def generate_markdown(all_data, week_range):
     
     if sorted_contributors:
         md.append("### 📊 Contribution Summary\n\n")
-        md.append("| Contributor | Commits | PRs Created | PRs Merged | Issues Created | Issues Closed | Code Changes | Repos |\n")
-        md.append("|-------------|---------|-------------|------------|----------------|---------------|--------------|-------|\n")
+        md.append("| Contributor | Commits | PRs | Merged | Reviewed | Issues | Closed | Comments | Code Changes | Files | Repos |\n")
+        md.append("|-------------|---------|-----|--------|----------|--------|--------|----------|--------------|-------|-------|\n")
         
         for name, stats in sorted_contributors:
             repos_str = ', '.join(sorted(stats['repos']))
             code_changes = f"+{stats['additions']:,}/-{stats['deletions']:,}"
+            total_comments = stats['pr_comments'] + stats['issue_comments']
             md.append(
                 f"| {name} | {stats['commits']} | {stats['prs_created']} | "
-                f"{stats['prs_merged']} | {stats['issues_created']} | "
-                f"{stats['issues_closed']} | {code_changes} | {repos_str} |\n"
+                f"{stats['prs_merged']} | {stats['prs_reviewed']} | {stats['issues_created']} | "
+                f"{stats['issues_closed']} | {total_comments} | {code_changes} | "
+                f"{stats['files_changed']} | {repos_str} |\n"
             )
         md.append("\n")
     
@@ -425,23 +564,40 @@ def generate_markdown(all_data, week_range):
     md.append("### 📝 Individual Activity Details\n\n")
     
     for name, stats in sorted_contributors:
-        if stats['commits'] == 0:
+        if stats['commits'] == 0 and stats['prs_created'] == 0 and stats['issues_created'] == 0:
             continue
             
         md.append(f"#### 👤 {name}\n\n")
-        md.append(f"**Overview:** {stats['commits']} commits across {len(stats['repos'])} repositories\n\n")
+        
+        # Comprehensive overview
+        total_activity = (
+            stats['commits'] + stats['prs_created'] + stats['prs_reviewed'] + 
+            stats['issues_created'] + stats['pr_comments'] + stats['issue_comments']
+        )
+        
+        md.append(f"**Total Activity Score:** {total_activity} actions  \n")
+        md.append(f"**Repositories:** {', '.join(sorted(stats['repos']))}  \n\n")
+        
+        md.append("**Breakdown:**\n")
+        md.append(f"- 💻 Commits: {stats['commits']} (+{stats['additions']:,}/-{stats['deletions']:,} lines, {stats['files_changed']} files)\n")
+        md.append(f"- 🔀 Pull Requests: {stats['prs_created']} created, {stats['prs_merged']} merged\n")
+        md.append(f"- 👀 Code Reviews: {stats['prs_reviewed']} PRs reviewed\n")
+        md.append(f"- 🎫 Issues: {stats['issues_created']} created, {stats['issues_closed']} closed\n")
+        md.append(f"- 💬 Comments: {stats['pr_comments']} on PRs, {stats['issue_comments']} on issues\n\n")
         
         # Show commits by repository
-        for repo_name in sorted(stats['repos']):
-            repo_commits = detailed_activities[name].get(repo_name, [])
-            if repo_commits:
-                md.append(f"**{repo_name.capitalize()}** ({len(repo_commits)} commits):\n\n")
-                for commit in repo_commits[:5]:  # Show up to 5 commits per repo
-                    md.append(f"- [`{commit['sha']}`]({commit['url']}) {commit['message']}  \n")
-                    md.append(f"  *{commit['date'][:10]}*\n\n")
-                
-                if len(repo_commits) > 5:
-                    md.append(f"*...and {len(repo_commits) - 5} more commits*\n\n")
+        if stats['commits'] > 0:
+            md.append("**Commit Activity:**\n\n")
+            for repo_name in sorted(stats['repos']):
+                repo_commits = detailed_activities[name].get(repo_name, [])
+                if repo_commits:
+                    md.append(f"**{repo_name.capitalize()}** ({len(repo_commits)} commits):\n\n")
+                    for commit in repo_commits[:5]:  # Show up to 5 commits per repo
+                        md.append(f"- [`{commit['sha']}`]({commit['url']}) {commit['message']}  \n")
+                        md.append(f"  *{commit['date'][:10]} • +{commit['additions']}/-{commit['deletions']} • {commit['files']} files*\n\n")
+                    
+                    if len(repo_commits) > 5:
+                        md.append(f"*...and {len(repo_commits) - 5} more commits*\n\n")
         
         md.append("\n")
     
@@ -492,18 +648,24 @@ def main():
         pull_requests = fetch_pull_requests(repo, start)
         issues = fetch_issues(repo, start)
         projects = fetch_projects(repo)
+        languages = fetch_repo_languages(repo)
+        contributors_stats = fetch_contributors_stats(repo)
         
         print(f"  ✓ {len(commits)} commits")
         print(f"  ✓ {len(pull_requests)} PRs")
         print(f"  ✓ {len(issues)} issues")
-        print(f"  ✓ {len(projects)} projects\n")
+        print(f"  ✓ {len(projects)} projects")
+        print(f"  ✓ {len(languages) if isinstance(languages, dict) else 0} languages")
+        print(f"  ✓ {len(contributors_stats) if isinstance(contributors_stats, list) else 0} contributors with stats\n")
         
         all_data.append({
             'name': repo,
             'commits': commits,
             'pull_requests': pull_requests,
             'issues': issues,
-            'projects': projects
+            'projects': projects,
+            'languages': languages if isinstance(languages, dict) else {},
+            'contributors_stats': contributors_stats if isinstance(contributors_stats, list) else []
         })
     
     # Generate markdown
