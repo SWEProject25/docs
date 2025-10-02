@@ -23,7 +23,7 @@ from PyPDF2 import PdfReader
 
 
 # Configuration
-GITHUB_TOKEN = os.environ.get('PAT_TOCKEN')
+GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
 ORG_NAME = os.environ.get('ORG_NAME') 
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 # Adjusted REPOS to reflect the Social Network project structure more accurately
