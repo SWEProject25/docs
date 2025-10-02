@@ -1,126 +1,155 @@
-# Weekly Report - Week 3, 2025
+# 📊 Weekly Progress Report - Week 3, 2025
 
-**Organization:** SWEProject25
-**Period:** 2025-01-06 to 2025-01-13
-**Generated:** 2025-10-02 18:11 UTC
+**Organization:** `SWEProject25`  
+**Reporting Period:** 2025-01-06 to 2025-01-13  
+**Generated:** 2025-10-02 18:16 UTC  
 
 ---
 
-## 📊 Overall Summary
+## 📈 Executive Summary
 
-- **Commits:** 0
-- **Issues Created:** 4
-- **Issues Closed:** 2
-- **PRs Opened:** 3
-- **PRs Merged:** 2
+| Metric | Count |
+|--------|-------|
+| Total Commits | 0 |
+| Issues Created | 4 |
+| Issues Closed | 2 |
+| Pull Requests Opened | 3 |
+| Pull Requests Merged | 2 |
+| Active Repositories | 3/5 |
 
 ---
 
 ## 📦 Repository Activity
 
-### `frontend`
+### 🔹 `frontend`
 
-**Activity Summary:**
-- Commits: 0
-- Issues: 3 created, 2 closed
-- Pull Requests: 2 opened, 1 merged
+**Weekly Statistics:**
 
-#### Issues
+| Metric | Count |
+|--------|-------|
+| Commits | 0 |
+| Issues Created | 3 |
+| Issues Closed | 2 |
+| Issues Updated | 0 |
+| PRs Opened | 2 |
+| PRs Merged | 1 |
+| PRs Closed (Unmerged) | 0 |
 
-**Created (3):**
+#### 📝 Issues Created
 
-- **#4** [add another hello](https://github.com/SWEProject25/frontend/issues/4)
-  - Created by: karimzakzouk
-- **#2** [add selector component](https://github.com/SWEProject25/frontend/issues/2)
-  - Created by: ahmedfathy0-0
-- **#1** [add ui button](https://github.com/SWEProject25/frontend/issues/1)
-  - Created by: ahmedfathy0-0
+| # | Title | Type | Priority | Labels | Creator | Assignee(s) | Status | Created |
+|---|-------|------|----------|--------|---------|-------------|--------|----------|
+| [#4](https://github.com/SWEProject25/frontend/issues/4) | add another hello | Feature | ⚪ Unset | `enhancement` | karimzakzouk | karimzakzouk | ✅ Closed | 2025-10-02 |
+| [#2](https://github.com/SWEProject25/frontend/issues/2) | add selector component | Feature | ⚪ Unset | `enhancement` | ahmedfathy0-0 | ahmedfathy0-0 | ✅ Closed | 2025-10-02 |
+| [#1](https://github.com/SWEProject25/frontend/issues/1) | add ui button | Feature | ⚪ Unset | `enhancement` | ahmedfathy0-0 | Unassigned | 🟢 Open | 2025-10-02 |
 
-**Closed (2):**
+#### ✅ Issues Closed
 
-- **#4** [add another hello](https://github.com/SWEProject25/frontend/issues/4)
-  - Closed by: ahmedfathy0-0
-- **#2** [add selector component](https://github.com/SWEProject25/frontend/issues/2)
-  - Closed by: ahmedfathy0-0
+| # | Title | Type | Labels | Closed By | Time to Close | Closed Date |
+|---|-------|------|--------|-----------|---------------|-------------|
+| [#4](https://github.com/SWEProject25/frontend/issues/4) | add another hello | Feature | `enhancement` | ahmedfathy0-0 | 0h | 2025-10-02 |
+| [#2](https://github.com/SWEProject25/frontend/issues/2) | add selector component | Feature | `enhancement` | ahmedfathy0-0 | 0h | 2025-10-02 |
 
-#### Pull Requests
+#### 🔀 Pull Requests Opened
 
-**Opened (2):**
+| # | Title | Author | Status | Labels | Changes | Reviewers | Created |
+|---|-------|--------|--------|--------|---------|-----------|----------|
+| [#5](https://github.com/SWEProject25/frontend/pull/5) | Update README.md | karimzakzouk | ✅ Merged | - | +0/-0 | - | 2025-10-02 |
+| [#3](https://github.com/SWEProject25/frontend/pull/3) | Update README to correct user interactions descrip... | karimzakzouk | 🟢 Open | - | +0/-0 | - | 2025-10-02 |
 
-- **#5** [Update README.md](https://github.com/SWEProject25/frontend/pull/5) ✅ Merged
-  - Author: karimzakzouk
-  - Changes: +0/-0 lines
-- **#3** [Update README to correct user interactions description](https://github.com/SWEProject25/frontend/pull/3) 🟢 Open
-  - Author: karimzakzouk
-  - Changes: +0/-0 lines
+#### ✅ Pull Requests Merged
 
-**Merged (1):**
-
-- **#5** [Update README.md](https://github.com/SWEProject25/frontend/pull/5)
-  - Author: karimzakzouk
-  - Merged by: unknown
-
----
-
-### `backend`
-
-_No activity this week._
+| # | Title | Author | Merged By | Changes | Labels | Merged Date |
+|---|-------|--------|-----------|---------|--------|-------------|
+| [#5](https://github.com/SWEProject25/frontend/pull/5) | Update README.md | karimzakzouk | N/A | +0/-0 | - | 2025-10-02 |
 
 ---
 
-### `mobile`
+### 🔹 `backend`
 
-**Activity Summary:**
-- Commits: 0
-- Issues: 0 created, 0 closed
-- Pull Requests: 1 opened, 1 merged
-
-#### Pull Requests
-
-**Opened (1):**
-
-- **#1** [Hello](https://github.com/SWEProject25/mobile/pull/1) ✅ Merged
-  - Author: Uderscore
-  - Changes: +0/-0 lines
-
-**Merged (1):**
-
-- **#1** [Hello](https://github.com/SWEProject25/mobile/pull/1)
-  - Author: Uderscore
-  - Merged by: unknown
+```
+⚠️  No activity recorded for this week.
+```
 
 ---
 
-### `devops`
+### 🔹 `mobile`
 
-**Activity Summary:**
-- Commits: 0
-- Issues: 1 created, 0 closed
-- Pull Requests: 0 opened, 0 merged
+**Weekly Statistics:**
 
-#### Issues
+| Metric | Count |
+|--------|-------|
+| Commits | 0 |
+| Issues Created | 0 |
+| Issues Closed | 0 |
+| Issues Updated | 0 |
+| PRs Opened | 1 |
+| PRs Merged | 1 |
+| PRs Closed (Unmerged) | 0 |
 
-**Created (1):**
+#### 🔀 Pull Requests Opened
 
-- **#1** [login-page](https://github.com/SWEProject25/devops/issues/1)
-  - Created by: karimzakzouk
+| # | Title | Author | Status | Labels | Changes | Reviewers | Created |
+|---|-------|--------|--------|--------|---------|-----------|----------|
+| [#1](https://github.com/SWEProject25/mobile/pull/1) | Hello | Uderscore | ✅ Merged | - | +0/-0 | - | 2025-09-30 |
+
+#### ✅ Pull Requests Merged
+
+| # | Title | Author | Merged By | Changes | Labels | Merged Date |
+|---|-------|--------|-----------|---------|--------|-------------|
+| [#1](https://github.com/SWEProject25/mobile/pull/1) | Hello | Uderscore | N/A | +0/-0 | - | 2025-09-30 |
 
 ---
 
-### `testing`
+### 🔹 `devops`
 
-_No activity this week._
+**Weekly Statistics:**
+
+| Metric | Count |
+|--------|-------|
+| Commits | 0 |
+| Issues Created | 1 |
+| Issues Closed | 0 |
+| Issues Updated | 0 |
+| PRs Opened | 0 |
+| PRs Merged | 0 |
+| PRs Closed (Unmerged) | 0 |
+
+#### 📝 Issues Created
+
+| # | Title | Type | Priority | Labels | Creator | Assignee(s) | Status | Created |
+|---|-------|------|----------|--------|---------|-------------|--------|----------|
+| [#1](https://github.com/SWEProject25/devops/issues/1) | login-page | Feature | ⚪ Unset | `enhancement` | karimzakzouk | ahmedfathy0-0 | 🟢 Open | 2025-10-02 |
+
+---
+
+### 🔹 `testing`
+
+```
+⚠️  No activity recorded for this week.
+```
 
 ---
 
 ## 👥 Team Contributions
 
-| Member | Commits | Issues Created | Issues Closed | PRs Opened | PRs Merged | Repositories |
-|--------|---------|----------------|---------------|------------|------------|-------------|
-| karimzakzouk | 0 | 2 | 0 | 2 | 1 | devops, frontend |
-| ahmedfathy0-0 | 0 | 2 | 2 | 0 | 0 | frontend |
-| Uderscore | 0 | 0 | 0 | 1 | 1 | mobile |
+| Member | Commits | Issues Created | Issues Closed | PRs Opened | PRs Merged | Code Changes | Active Repos |
+|--------|---------|----------------|---------------|------------|------------|--------------|-------------|
+| karimzakzouk | 0 | 2 | 0 | 2 | 1 | - | devops, frontend |
+| ahmedfathy0-0 | 0 | 2 | 2 | 0 | 0 | - | frontend |
+| Uderscore | 0 | 0 | 0 | 1 | 1 | - | mobile |
+
+## 🎯 Sprint Health Indicators
+
+| Indicator | Count | Status |
+|-----------|-------|--------|
+| Open Issues | 2 | ✅ Healthy |
+| Blocked Issues | 0 | ✅ None |
+| Unassigned Issues | 1 | ✅ Acceptable |
+| High Priority Open | 0 | ✅ Under Control |
+| Open Pull Requests | 1 | ✅ Healthy |
+| Stale PRs (>7 days) | 0 | ✅ None |
 
 ---
 
-*Report generated on 2025-10-02 18:11 UTC*
+<sub>Report generated automatically on 2025-10-02 18:16 UTC | Organization: SWEProject25 | Week 3, 2025</sub>
