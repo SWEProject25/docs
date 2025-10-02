@@ -120,21 +120,63 @@ def fetch_repo_activity(repo, start, end):
         'pull_requests': prs
     }
 
-def categorize_issues(issues):
-    """Categorize issues by created, closed, updated"""
-    return {
-        'created': [i for i in issues if datetime.fromisoformat(i['created_at'].replace('Z', '+00:00')) >= start],
-        'closed': [i for i in issues if i.get('closed_at') and datetime.fromisoformat(i['closed_at'].replace('Z', '+00:00')) >= start],
-        'updated': [i for i in issues if i['state'] == 'open']
+def get_issue_type(issue):
+    """Determine issue type from labels"""
+    labels = [label['name'].lower() for label in issue.get('labels', [])]
+    
+    type_keywords = {
+        'bug': ['bug', 'fix', 'error', 'defect'],
+        'feature': ['feature', 'enhancement', 'new'],
+        'documentation': ['docs', 'documentation'],
+        'task': ['task', 'chore'],
+        'security': ['security', 'vulnerability'],
+        'performance': ['performance', 'optimization', 'perf']
     }
+    
+    for issue_type, keywords in type_keywords.items():
+        if any(keyword in label for label in labels for keyword in keywords):
+            return issue_type.capitalize()
+    
+    return 'Task'
 
-def categorize_prs(prs):
-    """Categorize PRs by opened, merged, closed"""
-    return {
-        'opened': [pr for pr in prs if datetime.fromisoformat(pr['created_at'].replace('Z', '+00:00')) >= start],
-        'merged': [pr for pr in prs if pr.get('merged_at') and datetime.fromisoformat(pr['merged_at'].replace('Z', '+00:00')) >= start],
-        'closed': [pr for pr in prs if not pr.get('merged_at') and pr.get('closed_at') and datetime.fromisoformat(pr['closed_at'].replace('Z', '+00:00')) >= start]
-    }
+def get_priority(issue):
+    """Extract priority from labels"""
+    labels = [label['name'].lower() for label in issue.get('labels', [])]
+    
+    for label in labels:
+        if 'critical' in label or 'p0' in label:
+            return '🔴 Critical'
+        if 'high' in label or 'p1' in label:
+            return '🟠 High'
+        if 'medium' in label or 'p2' in label:
+            return '🟡 Medium'
+        if 'low' in label or 'p3' in label:
+            return '🟢 Low'
+    
+    return '⚪ Unset'
+
+def get_labels_str(item):
+    """Get formatted labels string"""
+    labels = [label['name'] for label in item.get('labels', [])]
+    if not labels:
+        return '-'
+    return ', '.join([f"`{label}`" for label in labels[:3]])
+
+def calculate_time_to_close(issue):
+    """Calculate time from creation to closure"""
+    if not issue.get('closed_at'):
+        return '-'
+    
+    created = datetime.fromisoformat(issue['created_at'].replace('Z', '+00:00'))
+    closed = datetime.fromisoformat(issue['closed_at'].replace('Z', '+00:00'))
+    delta = closed - created
+    
+    days = delta.days
+    hours = delta.seconds // 3600
+    
+    if days > 0:
+        return f"{days}d {hours}h"
+    return f"{hours}h"
 
 def generate_report(all_data, week_range):
     """Generate comprehensive weekly report"""
@@ -143,10 +185,10 @@ def generate_report(all_data, week_range):
     year = end.year
     
     md = [
-        f"# Weekly Report - Week {week_num}, {year}\n\n",
-        f"**Organization:** {ORG_NAME}\n",
-        f"**Period:** {format_date(start)} to {format_date(end)}\n",
-        f"**Generated:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}\n\n",
+        f"# 📊 Weekly Progress Report - Week {week_num}, {year}\n\n",
+        f"**Organization:** `{ORG_NAME}`  \n",
+        f"**Reporting Period:** {format_date(start)} to {format_date(end)}  \n",
+        f"**Generated:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}  \n\n",
         "---\n\n"
     ]
     
@@ -157,14 +199,17 @@ def generate_report(all_data, week_range):
     total_prs_opened = sum(len([pr for pr in repo['pull_requests'] if datetime.fromisoformat(pr['created_at'].replace('Z', '+00:00')) >= start]) for repo in all_data)
     total_prs_merged = sum(len([pr for pr in repo['pull_requests'] if pr.get('merged_at') and datetime.fromisoformat(pr['merged_at'].replace('Z', '+00:00')) >= start]) for repo in all_data)
     
-    # Overall Summary
+    # Executive Summary
     md.extend([
-        "## 📊 Overall Summary\n\n",
-        f"- **Commits:** {total_commits}\n",
-        f"- **Issues Created:** {total_issues_created}\n",
-        f"- **Issues Closed:** {total_issues_closed}\n",
-        f"- **PRs Opened:** {total_prs_opened}\n",
-        f"- **PRs Merged:** {total_prs_merged}\n\n",
+        "## 📈 Executive Summary\n\n",
+        "| Metric | Count |\n",
+        "|--------|-------|\n",
+        f"| Total Commits | {total_commits} |\n",
+        f"| Issues Created | {total_issues_created} |\n",
+        f"| Issues Closed | {total_issues_closed} |\n",
+        f"| Pull Requests Opened | {total_prs_opened} |\n",
+        f"| Pull Requests Merged | {total_prs_merged} |\n",
+        f"| Active Repositories | {len([r for r in all_data if len(r['commits']) > 0 or len(r['issues']) > 0 or len(r['pull_requests']) > 0])}/{len(REPOS)} |\n\n",
         "---\n\n"
     ])
     
@@ -180,93 +225,178 @@ def generate_report(all_data, week_range):
         # Categorize activity
         issues_created = [i for i in issues if datetime.fromisoformat(i['created_at'].replace('Z', '+00:00')) >= start]
         issues_closed = [i for i in issues if i.get('closed_at') and datetime.fromisoformat(i['closed_at'].replace('Z', '+00:00')) >= start]
+        issues_updated = [i for i in issues if i['state'] == 'open' and i not in issues_created]
         prs_opened = [pr for pr in prs if datetime.fromisoformat(pr['created_at'].replace('Z', '+00:00')) >= start]
         prs_merged = [pr for pr in prs if pr.get('merged_at') and datetime.fromisoformat(pr['merged_at'].replace('Z', '+00:00')) >= start]
+        prs_closed = [pr for pr in prs if not pr.get('merged_at') and pr.get('closed_at') and datetime.fromisoformat(pr['closed_at'].replace('Z', '+00:00')) >= start]
         
-        md.append(f"### `{repo_name}`\n\n")
+        md.append(f"### 🔹 `{repo_name}`\n\n")
         
         # Check if there was any activity
-        has_activity = len(commits) > 0 or len(issues_created) > 0 or len(issues_closed) > 0 or len(prs_opened) > 0 or len(prs_merged) > 0
+        has_activity = len(commits) > 0 or len(issues_created) > 0 or len(issues_closed) > 0 or len(issues_updated) > 0 or len(prs_opened) > 0 or len(prs_merged) > 0
         
         if not has_activity:
-            md.append("_No activity this week._\n\n")
+            md.append("```\n⚠️  No activity recorded for this week.\n```\n\n")
             md.append("---\n\n")
             continue
         
-        # Activity summary
-        md.append("**Activity Summary:**\n")
-        md.append(f"- Commits: {len(commits)}\n")
-        md.append(f"- Issues: {len(issues_created)} created, {len(issues_closed)} closed\n")
-        md.append(f"- Pull Requests: {len(prs_opened)} opened, {len(prs_merged)} merged\n\n")
+        # Quick Stats
+        md.append("**Weekly Statistics:**\n\n")
+        md.append("| Metric | Count |\n")
+        md.append("|--------|-------|\n")
+        md.append(f"| Commits | {len(commits)} |\n")
+        md.append(f"| Issues Created | {len(issues_created)} |\n")
+        md.append(f"| Issues Closed | {len(issues_closed)} |\n")
+        md.append(f"| Issues Updated | {len(issues_updated)} |\n")
+        md.append(f"| PRs Opened | {len(prs_opened)} |\n")
+        md.append(f"| PRs Merged | {len(prs_merged)} |\n")
+        md.append(f"| PRs Closed (Unmerged) | {len(prs_closed)} |\n\n")
         
-        # Commits section
+        # Commits section with grouped view
         if commits:
-            md.append("#### Commits\n\n")
-            # Group commits by author
+            md.append("#### 💻 Commits\n\n")
             commits_by_author = defaultdict(list)
-            for commit in commits[:20]:  # Limit to recent 20
+            for commit in commits:
                 author = commit.get('commit', {}).get('author', {}).get('name', 'Unknown')
                 commits_by_author[author].append(commit)
             
-            for author, author_commits in sorted(commits_by_author.items()):
-                md.append(f"**{author}** ({len(author_commits)} commits)\n")
-                for commit in author_commits[:5]:  # Show first 5 per author
-                    msg = commit.get('commit', {}).get('message', '').split('\n')[0][:80]
+            md.append("| Author | Commits | Sample Messages |\n")
+            md.append("|--------|---------|----------------|\n")
+            
+            for author, author_commits in sorted(commits_by_author.items(), key=lambda x: len(x[1]), reverse=True):
+                sample_msgs = []
+                for commit in author_commits[:3]:
+                    msg = commit.get('commit', {}).get('message', '').split('\n')[0][:50]
                     sha = commit.get('sha', '')[:7]
                     url = commit.get('html_url', '')
-                    md.append(f"- [`{sha}`]({url}) {msg}\n")
-                if len(author_commits) > 5:
-                    md.append(f"- _...and {len(author_commits) - 5} more_\n")
-                md.append("\n")
+                    sample_msgs.append(f"[`{sha}`]({url}) {msg}")
+                
+                msgs_str = '<br>'.join(sample_msgs)
+                if len(author_commits) > 3:
+                    msgs_str += f"<br>_...and {len(author_commits) - 3} more_"
+                
+                md.append(f"| {author} | {len(author_commits)} | {msgs_str} |\n")
+            
+            md.append("\n")
         
-        # Issues section
-        if issues_created or issues_closed:
-            md.append("#### Issues\n\n")
+        # Issues Created Table
+        if issues_created:
+            md.append("#### 📝 Issues Created\n\n")
+            md.append("| # | Title | Type | Priority | Labels | Creator | Assignee(s) | Status | Created |\n")
+            md.append("|---|-------|------|----------|--------|---------|-------------|--------|----------|\n")
             
-            if issues_created:
-                md.append(f"**Created ({len(issues_created)}):**\n\n")
-                for issue in issues_created[:10]:
-                    md.append(f"- **#{issue['number']}** [{issue['title']}]({issue['html_url']})\n")
-                    md.append(f"  - Created by: {issue.get('user', {}).get('login', 'unknown')}\n")
-                if len(issues_created) > 10:
-                    md.append(f"- _...and {len(issues_created) - 10} more_\n")
-                md.append("\n")
+            for issue in sorted(issues_created, key=lambda x: x['number'], reverse=True):
+                issue_num = f"[#{issue['number']}]({issue['html_url']})"
+                title = issue['title'][:60] + ('...' if len(issue['title']) > 60 else '')
+                issue_type = get_issue_type(issue)
+                priority = get_priority(issue)
+                labels = get_labels_str(issue)
+                creator = issue.get('user', {}).get('login', 'N/A')
+                assignees = ', '.join([a['login'] for a in issue.get('assignees', [])][:2]) or 'Unassigned'
+                if len(issue.get('assignees', [])) > 2:
+                    assignees += f" +{len(issue.get('assignees', [])) - 2}"
+                status = '🟢 Open' if issue['state'] == 'open' else '✅ Closed'
+                created_date = issue['created_at'][:10]
+                
+                md.append(f"| {issue_num} | {title} | {issue_type} | {priority} | {labels} | {creator} | {assignees} | {status} | {created_date} |\n")
             
-            if issues_closed:
-                md.append(f"**Closed ({len(issues_closed)}):**\n\n")
-                for issue in issues_closed[:10]:
-                    md.append(f"- **#{issue['number']}** [{issue['title']}]({issue['html_url']})\n")
-                    closed_by = issue.get('closed_by', {}).get('login', 'unknown') if issue.get('closed_by') else 'unknown'
-                    md.append(f"  - Closed by: {closed_by}\n")
-                if len(issues_closed) > 10:
-                    md.append(f"- _...and {len(issues_closed) - 10} more_\n")
-                md.append("\n")
+            md.append("\n")
         
-        # Pull Requests section
-        if prs_opened or prs_merged:
-            md.append("#### Pull Requests\n\n")
+        # Issues Closed Table
+        if issues_closed:
+            md.append("#### ✅ Issues Closed\n\n")
+            md.append("| # | Title | Type | Labels | Closed By | Time to Close | Closed Date |\n")
+            md.append("|---|-------|------|--------|-----------|---------------|-------------|\n")
             
-            if prs_opened:
-                md.append(f"**Opened ({len(prs_opened)}):**\n\n")
-                for pr in prs_opened[:10]:
-                    status = "✅ Merged" if pr.get('merged_at') else ("🟢 Open" if pr['state'] == 'open' else "❌ Closed")
-                    md.append(f"- **#{pr['number']}** [{pr['title']}]({pr['html_url']}) {status}\n")
-                    md.append(f"  - Author: {pr.get('user', {}).get('login', 'unknown')}\n")
-                    md.append(f"  - Changes: +{pr.get('additions', 0)}/-{pr.get('deletions', 0)} lines\n")
-                if len(prs_opened) > 10:
-                    md.append(f"- _...and {len(prs_opened) - 10} more_\n")
-                md.append("\n")
+            for issue in sorted(issues_closed, key=lambda x: x['number'], reverse=True):
+                issue_num = f"[#{issue['number']}]({issue['html_url']})"
+                title = issue['title'][:60] + ('...' if len(issue['title']) > 60 else '')
+                issue_type = get_issue_type(issue)
+                labels = get_labels_str(issue)
+                closed_by = issue.get('closed_by', {}).get('login', 'N/A') if issue.get('closed_by') else 'N/A'
+                time_to_close = calculate_time_to_close(issue)
+                closed_date = issue['closed_at'][:10] if issue.get('closed_at') else '-'
+                
+                md.append(f"| {issue_num} | {title} | {issue_type} | {labels} | {closed_by} | {time_to_close} | {closed_date} |\n")
             
-            if prs_merged:
-                md.append(f"**Merged ({len(prs_merged)}):**\n\n")
-                for pr in prs_merged[:10]:
-                    md.append(f"- **#{pr['number']}** [{pr['title']}]({pr['html_url']})\n")
-                    md.append(f"  - Author: {pr.get('user', {}).get('login', 'unknown')}\n")
-                    merged_by = pr.get('merged_by', {}).get('login', 'unknown') if pr.get('merged_by') else 'unknown'
-                    md.append(f"  - Merged by: {merged_by}\n")
-                if len(prs_merged) > 10:
-                    md.append(f"- _...and {len(prs_merged) - 10} more_\n")
-                md.append("\n")
+            md.append("\n")
+        
+        # Issues Updated (Open)
+        if issues_updated:
+            md.append("#### 🔄 Issues Updated (Still Open)\n\n")
+            md.append("| # | Title | Type | Priority | Labels | Assignee(s) | Last Updated |\n")
+            md.append("|---|-------|------|----------|--------|-------------|---------------|\n")
+            
+            for issue in sorted(issues_updated, key=lambda x: x['updated_at'], reverse=True)[:10]:
+                issue_num = f"[#{issue['number']}]({issue['html_url']})"
+                title = issue['title'][:60] + ('...' if len(issue['title']) > 60 else '')
+                issue_type = get_issue_type(issue)
+                priority = get_priority(issue)
+                labels = get_labels_str(issue)
+                assignees = ', '.join([a['login'] for a in issue.get('assignees', [])][:2]) or 'Unassigned'
+                if len(issue.get('assignees', [])) > 2:
+                    assignees += f" +{len(issue.get('assignees', [])) - 2}"
+                updated_date = issue['updated_at'][:10]
+                
+                md.append(f"| {issue_num} | {title} | {issue_type} | {priority} | {labels} | {assignees} | {updated_date} |\n")
+            
+            if len(issues_updated) > 10:
+                md.append(f"\n_...and {len(issues_updated) - 10} more updated issues._\n")
+            md.append("\n")
+        
+        # Pull Requests Opened Table
+        if prs_opened:
+            md.append("#### 🔀 Pull Requests Opened\n\n")
+            md.append("| # | Title | Author | Status | Labels | Changes | Reviewers | Created |\n")
+            md.append("|---|-------|--------|--------|--------|---------|-----------|----------|\n")
+            
+            for pr in sorted(prs_opened, key=lambda x: x['number'], reverse=True):
+                pr_num = f"[#{pr['number']}]({pr['html_url']})"
+                title = pr['title'][:50] + ('...' if len(pr['title']) > 50 else '')
+                author = pr.get('user', {}).get('login', 'N/A')
+                
+                if pr.get('merged_at'):
+                    status = '✅ Merged'
+                elif pr['state'] == 'open':
+                    status = '🟢 Open'
+                else:
+                    status = '❌ Closed'
+                
+                labels = get_labels_str(pr)
+                changes = f"+{pr.get('additions', 0)}/-{pr.get('deletions', 0)}"
+                
+                # Get reviewers
+                reviewers = []
+                if pr.get('requested_reviewers'):
+                    reviewers = [r['login'] for r in pr['requested_reviewers'][:2]]
+                reviewers_str = ', '.join(reviewers) if reviewers else '-'
+                if len(pr.get('requested_reviewers', [])) > 2:
+                    reviewers_str += f" +{len(pr.get('requested_reviewers', [])) - 2}"
+                
+                created_date = pr['created_at'][:10]
+                
+                md.append(f"| {pr_num} | {title} | {author} | {status} | {labels} | {changes} | {reviewers_str} | {created_date} |\n")
+            
+            md.append("\n")
+        
+        # Pull Requests Merged Table
+        if prs_merged:
+            md.append("#### ✅ Pull Requests Merged\n\n")
+            md.append("| # | Title | Author | Merged By | Changes | Labels | Merged Date |\n")
+            md.append("|---|-------|--------|-----------|---------|--------|-------------|\n")
+            
+            for pr in sorted(prs_merged, key=lambda x: x['merged_at'] if x.get('merged_at') else '', reverse=True):
+                pr_num = f"[#{pr['number']}]({pr['html_url']})"
+                title = pr['title'][:50] + ('...' if len(pr['title']) > 50 else '')
+                author = pr.get('user', {}).get('login', 'N/A')
+                merged_by = pr.get('merged_by', {}).get('login', 'N/A') if pr.get('merged_by') else 'N/A'
+                changes = f"+{pr.get('additions', 0)}/-{pr.get('deletions', 0)}"
+                labels = get_labels_str(pr)
+                merged_date = pr['merged_at'][:10] if pr.get('merged_at') else '-'
+                
+                md.append(f"| {pr_num} | {title} | {author} | {merged_by} | {changes} | {labels} | {merged_date} |\n")
+            
+            md.append("\n")
         
         md.append("---\n\n")
     
@@ -279,6 +409,8 @@ def generate_report(all_data, week_range):
         'issues_closed': 0,
         'prs_opened': 0,
         'prs_merged': 0,
+        'lines_added': 0,
+        'lines_deleted': 0,
         'repos': set()
     })
     
@@ -306,6 +438,8 @@ def generate_report(all_data, week_range):
             if datetime.fromisoformat(pr['created_at'].replace('Z', '+00:00')) >= start:
                 author = pr.get('user', {}).get('login', 'unknown')
                 team_stats[author]['prs_opened'] += 1
+                team_stats[author]['lines_added'] += pr.get('additions', 0)
+                team_stats[author]['lines_deleted'] += pr.get('deletions', 0)
                 team_stats[author]['repos'].add(repo_name)
             
             if pr.get('merged_at') and datetime.fromisoformat(pr['merged_at'].replace('Z', '+00:00')) >= start:
@@ -313,8 +447,8 @@ def generate_report(all_data, week_range):
                 team_stats[merger]['prs_merged'] += 1
                 team_stats[merger]['repos'].add(repo_name)
     
-    md.append("| Member | Commits | Issues Created | Issues Closed | PRs Opened | PRs Merged | Repositories |\n")
-    md.append("|--------|---------|----------------|---------------|------------|------------|-------------|\n")
+    md.append("| Member | Commits | Issues Created | Issues Closed | PRs Opened | PRs Merged | Code Changes | Active Repos |\n")
+    md.append("|--------|---------|----------------|---------------|------------|------------|--------------|-------------|\n")
     
     sorted_team = sorted(
         team_stats.items(),
@@ -325,30 +459,61 @@ def generate_report(all_data, week_range):
     for member, stats in sorted_team:
         if stats['commits'] == 0 and stats['issues_created'] == 0 and stats['prs_opened'] == 0:
             continue
+        
         repos_str = ', '.join(sorted(stats['repos'])) if stats['repos'] else '-'
+        code_changes = f"+{stats['lines_added']}/-{stats['lines_deleted']}" if stats['lines_added'] > 0 or stats['lines_deleted'] > 0 else '-'
+        
         md.append(
             f"| {member} | {stats['commits']} | {stats['issues_created']} | "
-            f"{stats['issues_closed']} | {stats['prs_opened']} | {stats['prs_merged']} | {repos_str} |\n"
+            f"{stats['issues_closed']} | {stats['prs_opened']} | {stats['prs_merged']} | {code_changes} | {repos_str} |\n"
         )
     
+    md.append("\n")
+    
+    # Sprint Health Indicators
+    md.append("## 🎯 Sprint Health Indicators\n\n")
+    
+    all_open_issues = [i for repo in all_data for i in repo['issues'] if i['state'] == 'open']
+    blocked_issues = [i for i in all_open_issues if any('block' in l['name'].lower() or 'waiting' in l['name'].lower() for l in i.get('labels', []))]
+    unassigned_issues = [i for i in all_open_issues if not i.get('assignees')]
+    high_priority_open = [i for i in all_open_issues if any('critical' in l['name'].lower() or 'high' in l['name'].lower() or 'p0' in l['name'].lower() or 'p1' in l['name'].lower() for l in i.get('labels', []))]
+    
+    open_prs = [pr for repo in all_data for pr in repo['pull_requests'] if pr['state'] == 'open']
+    stale_prs = [pr for pr in open_prs if (datetime.now(timezone.utc) - datetime.fromisoformat(pr['updated_at'].replace('Z', '+00:00'))).days > 7]
+    
+    md.append("| Indicator | Count | Status |\n")
+    md.append("|-----------|-------|--------|\n")
+    md.append(f"| Open Issues | {len(all_open_issues)} | {'⚠️ Review Needed' if len(all_open_issues) > 20 else '✅ Healthy'} |\n")
+    md.append(f"| Blocked Issues | {len(blocked_issues)} | {'🔴 Critical' if len(blocked_issues) > 0 else '✅ None'} |\n")
+    md.append(f"| Unassigned Issues | {len(unassigned_issues)} | {'⚠️ Needs Assignment' if len(unassigned_issues) > 5 else '✅ Acceptable'} |\n")
+    md.append(f"| High Priority Open | {len(high_priority_open)} | {'🔴 Attention Required' if len(high_priority_open) > 3 else '✅ Under Control'} |\n")
+    md.append(f"| Open Pull Requests | {len(open_prs)} | {'⚠️ Review Backlog' if len(open_prs) > 10 else '✅ Healthy'} |\n")
+    md.append(f"| Stale PRs (>7 days) | {len(stale_prs)} | {'⚠️ Review ASAP' if len(stale_prs) > 0 else '✅ None'} |\n")
+    
     md.append("\n---\n\n")
-    md.append(f"*Report generated on {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}*\n")
+    
+    # Footer
+    md.append(f"<sub>Report generated automatically on {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} | ")
+    md.append(f"Organization: {ORG_NAME} | Week {week_num}, {year}</sub>\n")
     
     return ''.join(md)
 
 def main():
-    print("Starting weekly report generation...")
-    print(f"Organization: {ORG_NAME}")
+    print("=" * 60)
+    print("Weekly Progress Report Generator")
+    print("=" * 60)
+    print(f"\nOrganization: {ORG_NAME}")
     print(f"Repositories: {', '.join(REPOS)}\n")
     
     global start, end
     start, end = get_week_range()
     print(f"Period: {format_date(start)} to {format_date(end)}\n")
+    print("=" * 60)
     
     all_data = []
     
     for repo in REPOS:
-        print(f"Processing {repo}...")
+        print(f"\n📦 Processing {repo}...")
         activity = fetch_repo_activity(repo, start, end)
         
         all_data.append({
@@ -358,7 +523,8 @@ def main():
             'pull_requests': activity['pull_requests']
         })
     
-    print("\nGenerating weekly report...")
+    print("\n" + "=" * 60)
+    print("Generating comprehensive report...")
     markdown = generate_report(all_data, (start, end))
     
     # Save report
@@ -371,14 +537,16 @@ def main():
     filepath = reports_dir / filename
     
     filepath.write_text(markdown, encoding='utf-8')
-    print(f"Report saved: reports/{filename}")
+    print(f"✅ Report saved: reports/{filename}")
     
     # Update latest
     latest_path = reports_dir / 'latest.md'
     latest_path.write_text(markdown, encoding='utf-8')
-    print(f"Latest updated: reports/latest.md")
+    print(f"✅ Latest updated: reports/latest.md")
     
-    print("\nWeekly report generation complete!")
+    print("\n" + "=" * 60)
+    print("✨ Weekly report generation complete!")
+    print("=" * 60)
 
 if __name__ == '__main__':
     main()
