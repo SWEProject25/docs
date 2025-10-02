@@ -981,11 +981,15 @@ def generate_markdown(all_data, week_range):
     
     insights = []
     
+    # Calculate closed issues count
+    total_closed_issues = sum(len([i for i in repo['issues'] if i.get('closed_at')]) for repo in all_data)
+    total_open_issues = sum(len([i for i in repo['issues'] if i['state'] == 'open']) for repo in all_data)
+    
     if merged_prs > 10:
         insights.append(f"🎉 High PR merge rate: {merged_prs} PRs merged this week")
     
-    if closed_issues > 15:
-        insights.append(f"✅ Excellent issue resolution: {closed_issues} issues closed")
+    if total_closed_issues > 15:
+        insights.append(f"✅ Excellent issue resolution: {total_closed_issues} issues closed")
     
     blocked = []
     for repo in all_data:
@@ -993,8 +997,8 @@ def generate_markdown(all_data, week_range):
     if blocked:
         insights.append(f"⚠️ {len(blocked)} issues are currently blocked - attention needed")
     
-    if open_issues > closed_issues * 2:
-        insights.append(f"📈 Issue backlog growing: {open_issues} open vs {closed_issues} closed")
+    if total_open_issues > total_closed_issues * 2:
+        insights.append(f"📈 Issue backlog growing: {total_open_issues} open vs {total_closed_issues} closed")
     
     if total_commits > 100:
         insights.append(f"🚀 High development activity: {total_commits} commits")
