@@ -18,28 +18,13 @@
 
 ## Repository: frontend
 
-### Issues Activity
+### Issues
 
-**Status:** 1 Open | 0 Closed
+**Summary:** 1 Open | 0 Closed
 
-**By Type:**
-- Feature: 1
-
-**By Priority:**
-- Unset: 1
-
-### Issue Details
-
-#### #1 - add ui button
-
-**Link:** https://github.com/SWEProject25/frontend/issues/1
-
-**Details:**
-- Status: Open
-- Type: Feature
-- Priority: Unset
-- Created: 2025-10-02 by ahmedfathy0-0
-- Labels: `enhancement`
+| # | Title | Status | Type | Priority | Creator | Assigned To | Created | Completed | Time |
+|---|-------|--------|------|----------|---------|-------------|---------|-----------|------|
+| #1 | [add ui button](https://github.com/SWEProject25/frontend/issues/1) | 🟢 Open | Feature | Unset | ahmedfathy0-0 | Unassigned | 2025-10-02 | - | - |
 
 ---
 
@@ -59,31 +44,13 @@
 
 ## Repository: devops
 
-### Issues Activity
+### Issues
 
-**Status:** 1 Open | 0 Closed
+**Summary:** 1 Open | 0 Closed
 
-**By Type:**
-- Feature: 1
-
-**By Priority:**
-- Unset: 1
-
-### Issue Details
-
-#### #1 - login-page
-
-**Link:** https://github.com/SWEProject25/devops/issues/1
-
-**Details:**
-- Status: Open
-- Type: Feature
-- Priority: Unset
-- Created: 2025-10-02 by karimzakzouk
-- Labels: `enhancement`
-- Assigned To: ahmedfathy0-0
-- Assignment History:
-  - unknown assigned to ahmedfathy0-0 on 2025-10-02
+| # | Title | Status | Type | Priority | Creator | Assigned To | Created | Completed | Time |
+|---|-------|--------|------|----------|---------|-------------|---------|-----------|------|
+| #1 | [login-page](https://github.com/SWEProject25/devops/issues/1) | 🟢 Open | Feature | Unset | karimzakzouk | ahmedfathy0-0 | 2025-10-02 | - | - |
 
 ---
 
