@@ -798,15 +798,23 @@ def generate_pdf_report(all_data, week_range):
         else:
             return 'CRITICAL', colors.HexColor('#E74C3C')
     
-    health_data = [
-        ['METRIC', 'VALUE', 'STATUS', 'ASSESSMENT'],
-        ['Total Open Issues', str(len(all_open_issues)), *get_health_status(len(all_open_issues), (15, 25)), 'Issues awaiting resolution'],
-        ['Blocked Issues', str(len(blocked_issues)), *get_health_status(len(blocked_issues), (0, 2)), 'Issues with blockers or dependencies'],
-        ['Unassigned Issues', str(len(unassigned_issues)), *get_health_status(len(unassigned_issues), (3, 8)), 'Issues without assigned developers'],
-        ['High Priority Open', str(len(high_priority_open)), *get_health_status(len(high_priority_open), (2, 5)), 'Critical/high priority unresolved'],
-        ['Open Pull Requests', str(len(open_prs)), *get_health_status(len(open_prs), (8, 15)), 'PRs awaiting review/merge'],
-        ['Stale PRs (>7 days)', str(len(stale_prs)), *get_health_status(len(stale_prs), (0, 3)), 'PRs without recent activity'],
+    # Build health data with status info stored separately
+    health_metrics = [
+        ('Total Open Issues', len(all_open_issues), (15, 25), 'Issues awaiting resolution'),
+        ('Blocked Issues', len(blocked_issues), (0, 2), 'Issues with blockers or dependencies'),
+        ('Unassigned Issues', len(unassigned_issues), (3, 8), 'Issues without assigned developers'),
+        ('High Priority Open', len(high_priority_open), (2, 5), 'Critical/high priority unresolved'),
+        ('Open Pull Requests', len(open_prs), (8, 15), 'PRs awaiting review/merge'),
+        ('Stale PRs (>7 days)', len(stale_prs), (0, 3), 'PRs without recent activity'),
     ]
+    
+    health_data = [['METRIC', 'VALUE', 'STATUS', 'ASSESSMENT']]
+    health_status_colors = []  # Store colors separately
+    
+    for metric_name, value, thresholds, assessment in health_metrics:
+        status_text, status_color = get_health_status(value, thresholds)
+        health_data.append([metric_name, str(value), status_text, assessment])
+        health_status_colors.append(status_color)
     
     health_table = Table(health_data, colWidths=[4.5*cm, 2.5*cm, 3*cm, 7*cm])
     
@@ -828,9 +836,8 @@ def generate_pdf_report(all_data, week_range):
         ('FONTNAME', (2, 1), (2, -1), 'Helvetica-Bold'),
     ]
     
-    # Add row colors based on status
-    for i, row in enumerate(health_data[1:], 1):
-        status_color = row[2]  # The color from get_health_status
+    # Add row colors based on status using the stored colors
+    for i, status_color in enumerate(health_status_colors, 1):
         health_style.append(('BACKGROUND', (2, i), (2, i), status_color))
         health_style.append(('TEXTCOLOR', (2, i), (2, i), colors.white))
     
