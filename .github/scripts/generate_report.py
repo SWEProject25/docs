@@ -214,71 +214,42 @@ def generate_sprint_report(all_data, week_range):
                     md.append(f"- Due Date: {milestone['due_on'][:10]}\n")
                 md.append("\n")
         
-        # Issues Breakdown
+        # Issues Table
         if issues:
-            md.append("### Issues Activity\n\n")
+            md.append("### Issues\n\n")
             
             open_issues = [i for i in issues if i['state'] == 'open']
             closed_issues = [i for i in issues if i['state'] == 'closed']
             
-            md.append(f"**Status:** {len(open_issues)} Open | {len(closed_issues)} Closed\n\n")
+            md.append(f"**Summary:** {len(open_issues)} Open | {len(closed_issues)} Closed\n\n")
             
-            # Type breakdown
-            type_counts = Counter([categorize_issue(i) for i in issues])
-            md.append("**By Type:**\n")
-            for issue_type, count in type_counts.most_common():
-                md.append(f"- {issue_type.capitalize()}: {count}\n")
-            md.append("\n")
-            
-            # Priority breakdown
-            priority_counts = Counter([get_issue_priority(i) for i in issues])
-            md.append("**By Priority:**\n")
-            for priority, count in sorted(priority_counts.items(), key=lambda x: {'Critical': 0, 'High': 1, 'Medium': 2, 'Low': 3}.get(x[0], 4)):
-                md.append(f"- {priority}: {count}\n")
-            md.append("\n")
-            
-            # Detailed issue list
-            md.append("### Issue Details\n\n")
+            # Issues table
+            md.append("| # | Title | Status | Type | Priority | Creator | Assigned To | Created | Completed | Time |\n")
+            md.append("|---|-------|--------|------|----------|---------|-------------|---------|-----------|------|\n")
             
             for issue in sorted(issues, key=lambda x: x['number']):
-                status = "Open" if issue['state'] == 'open' else "Closed"
-                issue_type = categorize_issue(issue)
+                status = "🟢 Open" if issue['state'] == 'open' else "✅ Closed"
+                issue_type = categorize_issue(issue).capitalize()
                 priority = get_issue_priority(issue)
+                creator = issue.get('user', {}).get('login', 'N/A')
                 
-                md.append(f"#### #{issue['number']} - {issue['title']}\n\n")
-                md.append(f"**Link:** {issue['html_url']}\n\n")
-                md.append(f"**Details:**\n")
-                md.append(f"- Status: {status}\n")
-                md.append(f"- Type: {issue_type.capitalize()}\n")
-                md.append(f"- Priority: {priority}\n")
-                md.append(f"- Created: {issue['created_at'][:10]} by {issue.get('user', {}).get('login', 'unknown')}\n")
+                # Get assignees
+                assignees = ', '.join([a['login'] for a in issue.get('assignees', [])]) or 'Unassigned'
                 
-                if issue.get('closed_at'):
-                    completion_time = calculate_completion_time(issue)
-                    md.append(f"- Closed: {issue['closed_at'][:10]} (took {completion_time})\n")
+                # Dates
+                created_date = issue['created_at'][:10]
+                closed_date = issue['closed_at'][:10] if issue.get('closed_at') else '-'
+                completion_time = calculate_completion_time(issue) or '-'
                 
-                # Labels
-                if issue.get('labels'):
-                    labels_str = ', '.join([f"`{l['name']}`" for l in issue['labels']])
-                    md.append(f"- Labels: {labels_str}\n")
+                # Issue title with link
+                title_link = f"[{issue['title']}]({issue['html_url']})"
                 
-                # Assignees
-                if issue.get('assignees'):
-                    assignees_str = ', '.join([a['login'] for a in issue['assignees']])
-                    md.append(f"- Assigned To: {assignees_str}\n")
-                
-                # Assignment history
-                assignments = extract_assignment_history(issue)
-                if assignments:
-                    md.append(f"- Assignment History:\n")
-                    for assignment in assignments:
-                        md.append(f"  - {assignment['assigner']} assigned to {assignment['assignee']} on {assignment['date'][:10]}\n")
-                
-                # Milestone
-                if issue.get('milestone'):
-                    md.append(f"- Milestone: {issue['milestone']['title']}\n")
-                
-                md.append("\n")
+                md.append(
+                    f"| #{issue['number']} | {title_link} | {status} | {issue_type} | {priority} | "
+                    f"{creator} | {assignees} | {created_date} | {closed_date} | {completion_time} |\n"
+                )
+            
+            md.append("\n")
         
         # Pull Requests Summary
         if prs:
@@ -422,7 +393,7 @@ def main():
     markdown = generate_sprint_report(all_data, (start, end))
     
     # Save report
-    reports_dir = Path('reports')
+    reports_dir = Path('sprint_reports')
     reports_dir.mkdir(exist_ok=True)
     
     week_num = end.isocalendar()[1]
