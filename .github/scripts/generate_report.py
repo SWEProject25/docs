@@ -2,7 +2,7 @@
 
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 import requests
 from pathlib import Path
@@ -22,8 +22,8 @@ HEADERS = {
 }
 
 def get_week_range():
-    """Get start and end dates for the past week"""
-    end = datetime.now()
+    """Get start and end dates for the past week (timezone-aware)"""
+    end = datetime.now(timezone.utc)
     start = end - timedelta(days=7)
     return start, end
 
@@ -34,6 +34,10 @@ def get_week_number(date):
 def format_date(date):
     """Format date as YYYY-MM-DD"""
     return date.strftime('%Y-%m-%d')
+
+def format_datetime(date):
+    """Format datetime as YYYY-MM-DD HH:MM UTC"""
+    return date.strftime('%Y-%m-%d %H:%M UTC')
 
 def github_api_get(url, params=None):
     """Make GET request to GitHub API"""
@@ -46,7 +50,7 @@ def github_api_get(url, params=None):
         return []
 
 def fetch_commits(repo, since, until):
-    """Fetch commits for a repository"""
+    """Fetch commits for a repository with detailed information"""
     url = f'https://api.github.com/repos/{ORG_NAME}/{repo}/commits'
     params = {
         'since': since.isoformat(),
@@ -73,10 +77,16 @@ def fetch_pull_requests(repo, since):
         return []
     
     # Filter PRs updated within the time range
-    filtered_prs = [
-        pr for pr in prs 
-        if datetime.fromisoformat(pr['updated_at'].replace('Z', '+00:00')) >= since
-    ]
+    filtered_prs = []
+    for pr in prs:
+        try:
+            updated_at = datetime.fromisoformat(pr['updated_at'].replace('Z', '+00:00'))
+            if updated_at >= since:
+                filtered_prs.append(pr)
+        except (KeyError, ValueError) as e:
+            print(f"⚠️  Error parsing PR date: {e}")
+            continue
+    
     return filtered_prs
 
 def fetch_issues(repo, since):
@@ -98,7 +108,8 @@ def fetch_issues(repo, since):
     return filtered_issues
 
 def fetch_projects(repo):
-    """Fetch GitHub Projects (Kanban) data for a repository"""
+    """Fetch GitHub Projects (Kanban) data - handles deprecated API gracefully"""
+    # Note: Classic Projects API is deprecated, but we'll try it
     url = f'https://api.github.com/repos/{ORG_NAME}/{repo}/projects'
     params = {'per_page': 10}
     
@@ -137,27 +148,96 @@ def fetch_projects(repo):
     
     return projects_data
 
-def aggregate_contributors(commits):
-    """Aggregate commit statistics by contributor"""
-    contributors = defaultdict(lambda: {'commits': 0})
+def aggregate_detailed_contributors(commits, pull_requests, issues, repo_name):
+    """Aggregate detailed contribution statistics by contributor"""
+    contributors = defaultdict(lambda: {
+        'commits': [],
+        'prs_created': [],
+        'prs_merged': [],
+        'prs_reviewed': [],
+        'issues_created': [],
+        'issues_closed': [],
+        'total_additions': 0,
+        'total_deletions': 0,
+        'repos': set()
+    })
     
+    # Process commits
     for commit in commits:
         if commit and 'commit' in commit and 'author' in commit['commit']:
-            author = commit['commit']['author']['name']
-            contributors[author]['commits'] += 1
+            author_name = commit['commit']['author']['name']
+            author_email = commit['commit']['author'].get('email', 'unknown')
+            
+            commit_data = {
+                'sha': commit['sha'][:7],
+                'message': commit['commit']['message'].split('\n')[0][:80],
+                'date': commit['commit']['author'].get('date', 'unknown'),
+                'url': commit.get('html_url', '')
+            }
+            
+            # Get commit stats if available
+            if 'stats' in commit:
+                contributors[author_name]['total_additions'] += commit['stats'].get('additions', 0)
+                contributors[author_name]['total_deletions'] += commit['stats'].get('deletions', 0)
+            
+            contributors[author_name]['commits'].append(commit_data)
+            contributors[author_name]['repos'].add(repo_name)
+    
+    # Process pull requests
+    for pr in pull_requests:
+        # PR Creator
+        if pr.get('user'):
+            creator = pr['user'].get('login', 'unknown')
+            pr_data = {
+                'number': pr['number'],
+                'title': pr['title'],
+                'state': pr['state'],
+                'url': pr['html_url'],
+                'created_at': pr.get('created_at', 'unknown'),
+                'merged_at': pr.get('merged_at')
+            }
+            
+            contributors[creator]['prs_created'].append(pr_data)
+            contributors[creator]['repos'].add(repo_name)
+            
+            # Track merged PRs
+            if pr.get('merged_at'):
+                contributors[creator]['prs_merged'].append(pr_data)
+    
+    # Process issues
+    for issue in issues:
+        if issue.get('user'):
+            creator = issue['user'].get('login', 'unknown')
+            issue_data = {
+                'number': issue['number'],
+                'title': issue['title'],
+                'state': issue['state'],
+                'url': issue['html_url'],
+                'created_at': issue.get('created_at', 'unknown')
+            }
+            
+            contributors[creator]['issues_created'].append(issue_data)
+            contributors[creator]['repos'].add(repo_name)
+            
+            # Track closed issues
+            if issue.get('closed_at'):
+                contributors[creator]['issues_closed'].append(issue_data)
     
     return dict(contributors)
 
 def generate_markdown(all_data, week_range):
-    """Generate markdown report"""
+    """Generate comprehensive production-level markdown report"""
     start, end = week_range
     week_num = get_week_number(end)
     year = end.year
     
     md = [
-        f"# 📊 Weekly Progress Report\n",
-        f"**Week {week_num}, {year}** | {format_date(start)} to {format_date(end)}\n",
-        "---\n"
+        f"# 📊 Weekly Engineering Progress Report\n\n",
+        f"**Organization:** `{ORG_NAME}`  \n",
+        f"**Report Period:** Week {week_num}, {year}  \n",
+        f"**Date Range:** {format_date(start)} to {format_date(end)}  \n",
+        f"**Generated:** {format_datetime(end)}  \n",
+        "\n---\n\n"
     ]
     
     # Executive Summary
@@ -174,85 +254,152 @@ def generate_markdown(all_data, week_range):
     )
     active_repos = len([repo for repo in all_data if len(repo['commits']) > 0])
     
+    # Calculate total code changes
+    total_additions = 0
+    total_deletions = 0
+    for repo_data in all_data:
+        for commit in repo_data['commits']:
+            if 'stats' in commit:
+                total_additions += commit['stats'].get('additions', 0)
+                total_deletions += commit['stats'].get('deletions', 0)
+    
     md.extend([
-        "## 📈 Executive Summary\n",
-        f"- **Total Commits**: {total_commits}\n",
-        f"- **Pull Requests**: {total_prs} ({merged_prs} merged)\n",
-        f"- **Issues**: {total_issues} ({closed_issues} closed)\n",
-        f"- **Active Repositories**: {active_repos}/{len(REPOS)}\n"
+        "## 📈 Executive Summary\n\n",
+        "| Metric | Count |\n",
+        "|--------|-------|\n",
+        f"| Total Commits | {total_commits} |\n",
+        f"| Code Additions | +{total_additions:,} lines |\n",
+        f"| Code Deletions | -{total_deletions:,} lines |\n",
+        f"| Pull Requests (Total) | {total_prs} |\n",
+        f"| Pull Requests (Merged) | {merged_prs} |\n",
+        f"| Issues (Total) | {total_issues} |\n",
+        f"| Issues (Closed) | {closed_issues} |\n",
+        f"| Active Repositories | {active_repos}/{len(REPOS)} |\n\n"
     ])
     
-    # Per-Repository Breakdown
-    md.append("\n## 🗂️ Repository Breakdown\n")
+    # Repository-Level Detailed Breakdown
+    md.append("## 🗂️ Repository-Level Analysis\n\n")
     
     for repo_data in all_data:
         repo_name = repo_data['name']
-        md.append(f"\n### {repo_name.capitalize()}\n")
+        md.append(f"### 📦 {repo_name.capitalize()}\n\n")
         
-        # Stats
+        # Repository Stats
         commits_count = len(repo_data['commits'])
         prs_count = len(repo_data['pull_requests'])
         merged_count = len([pr for pr in repo_data['pull_requests'] if pr.get('merged_at')])
-        issues_created = len([i for i in repo_data['issues'] if i.get('created_at')])
+        issues_created = len(repo_data['issues'])
         issues_closed = len([i for i in repo_data['issues'] if i.get('closed_at')])
         
+        # Calculate repo-specific code changes
+        repo_additions = sum(c['stats'].get('additions', 0) for c in repo_data['commits'] if 'stats' in c)
+        repo_deletions = sum(c['stats'].get('deletions', 0) for c in repo_data['commits'] if 'stats' in c)
+        
         md.extend([
-            "**Activity Summary:**\n",
-            f"- Commits: {commits_count}\n",
-            f"- Pull Requests: {prs_count} ({merged_count} merged)\n",
-            f"- Issues: {issues_created} created, {issues_closed} closed\n"
+            "**📊 Activity Metrics:**\n\n",
+            "| Metric | Value |\n",
+            "|--------|-------|\n",
+            f"| Commits | {commits_count} |\n",
+            f"| Lines Added | +{repo_additions:,} |\n",
+            f"| Lines Removed | -{repo_deletions:,} |\n",
+            f"| Pull Requests | {prs_count} ({merged_count} merged) |\n",
+            f"| Issues | {issues_created} created, {issues_closed} closed |\n\n"
         ])
         
-        # Projects/Kanban
+        # Detailed Commit Log
+        if repo_data['commits']:
+            md.append("**📝 Commit History:**\n\n")
+            for commit in repo_data['commits'][:10]:  # Show up to 10 commits
+                if commit and 'commit' in commit:
+                    sha = commit['sha'][:7]
+                    message = commit['commit']['message'].split('\n')[0][:100]
+                    author = commit['commit']['author']['name']
+                    date = commit['commit']['author'].get('date', 'unknown')
+                    url = commit.get('html_url', '#')
+                    
+                    md.append(f"- [`{sha}`]({url}) - {message}  \n")
+                    md.append(f"  *by {author} on {date[:10]}*\n\n")
+            
+            if len(repo_data['commits']) > 10:
+                md.append(f"*...and {len(repo_data['commits']) - 10} more commits*\n\n")
+        
+        # Pull Requests Detail
+        if repo_data['pull_requests']:
+            md.append("**🔀 Pull Requests:**\n\n")
+            for pr in repo_data['pull_requests'][:10]:
+                status_icon = "✅" if pr.get('merged_at') else ("🔄" if pr['state'] == 'open' else "❌")
+                status_text = "Merged" if pr.get('merged_at') else pr['state'].capitalize()
+                creator = pr.get('user', {}).get('login', 'unknown')
+                
+                md.append(f"- {status_icon} **[PR #{pr['number']}]({pr['html_url']})** - {pr['title']}  \n")
+                md.append(f"  *{status_text} by @{creator}*\n\n")
+            
+            if len(repo_data['pull_requests']) > 10:
+                md.append(f"*...and {len(repo_data['pull_requests']) - 10} more PRs*\n\n")
+        
+        # Issues Detail
+        if repo_data['issues']:
+            md.append("**🎫 Issues:**\n\n")
+            for issue in repo_data['issues'][:10]:
+                status_icon = "✅" if issue.get('closed_at') else "🔄"
+                status_text = "Closed" if issue.get('closed_at') else "Open"
+                creator = issue.get('user', {}).get('login', 'unknown')
+                
+                md.append(f"- {status_icon} **[Issue #{issue['number']}]({issue['html_url']})** - {issue['title']}  \n")
+                md.append(f"  *{status_text} by @{creator}*\n\n")
+            
+            if len(repo_data['issues']) > 10:
+                md.append(f"*...and {len(repo_data['issues']) - 10} more issues*\n\n")
+        
+        # Project Boards
         if repo_data['projects']:
-            md.append("\n**Project Boards:**\n")
+            md.append("**📊 Project Board Status:**\n\n")
             for project in repo_data['projects']:
                 md.append(f"- **{project['name']}**\n")
                 for column in project['columns']:
                     md.append(f"  - {column['name']}: {column['card_count']} cards\n")
+                md.append("\n")
         
-        # Notable PRs
-        notable_prs = [
-            pr for pr in repo_data['pull_requests']
-            if pr.get('merged_at') or pr.get('state') == 'open'
-        ][:5]
-        
-        if notable_prs:
-            md.append("\n**Notable Pull Requests:**\n")
-            for pr in notable_prs:
-                if pr.get('merged_at'):
-                    status = "✅ Merged"
-                elif pr.get('state') == 'open':
-                    status = "🔄 Open"
-                else:
-                    status = "❌ Closed"
-                md.append(f"- {status}: [#{pr['number']}]({pr['html_url']}) - {pr['title']}\n")
-        
-        # Top Contributors
-        contributors = aggregate_contributors(repo_data['commits'])
-        top_contributors = sorted(
-            contributors.items(),
-            key=lambda x: x[1]['commits'],
-            reverse=True
-        )[:3]
-        
-        if top_contributors:
-            md.append("\n**Top Contributors:**\n")
-            for name, stats in top_contributors:
-                md.append(f"- {name}: {stats['commits']} commits\n")
-        
-        md.append("\n---\n")
+        md.append("---\n\n")
     
-    # Overall Team Contributions
-    md.append("\n## 👥 Team Contributions\n")
+    # Comprehensive Team Contributions
+    md.append("## 👥 Detailed Team Contributions\n\n")
     
-    all_contributors = defaultdict(lambda: {'commits': 0, 'repos': set()})
+    all_contributors = defaultdict(lambda: {
+        'commits': 0,
+        'prs_created': 0,
+        'prs_merged': 0,
+        'issues_created': 0,
+        'issues_closed': 0,
+        'repos': set(),
+        'additions': 0,
+        'deletions': 0
+    })
+    
+    detailed_activities = defaultdict(lambda: defaultdict(list))
+    
     for repo_data in all_data:
-        repo_contributors = aggregate_contributors(repo_data['commits'])
+        repo_contributors = aggregate_detailed_contributors(
+            repo_data['commits'],
+            repo_data['pull_requests'],
+            repo_data['issues'],
+            repo_data['name']
+        )
+        
         for name, stats in repo_contributors.items():
-            all_contributors[name]['commits'] += stats['commits']
-            all_contributors[name]['repos'].add(repo_data['name'])
+            all_contributors[name]['commits'] += len(stats['commits'])
+            all_contributors[name]['prs_created'] += len(stats['prs_created'])
+            all_contributors[name]['prs_merged'] += len(stats['prs_merged'])
+            all_contributors[name]['issues_created'] += len(stats['issues_created'])
+            all_contributors[name]['issues_closed'] += len(stats['issues_closed'])
+            all_contributors[name]['repos'].update(stats['repos'])
+            all_contributors[name]['additions'] += stats['total_additions']
+            all_contributors[name]['deletions'] += stats['total_deletions']
+            
+            # Store detailed activities
+            detailed_activities[name][repo_data['name']].extend(stats['commits'])
     
+    # Summary Table
     sorted_contributors = sorted(
         all_contributors.items(),
         key=lambda x: x[1]['commits'],
@@ -260,39 +407,78 @@ def generate_markdown(all_data, week_range):
     )
     
     if sorted_contributors:
-        md.append("\n| Contributor | Total Commits | Active Repos |\n")
-        md.append("|-------------|---------------|---------------|\n")
+        md.append("### 📊 Contribution Summary\n\n")
+        md.append("| Contributor | Commits | PRs Created | PRs Merged | Issues Created | Issues Closed | Code Changes | Repos |\n")
+        md.append("|-------------|---------|-------------|------------|----------------|---------------|--------------|-------|\n")
+        
         for name, stats in sorted_contributors:
             repos_str = ', '.join(sorted(stats['repos']))
-            md.append(f"| {name} | {stats['commits']} | {repos_str} |\n")
+            code_changes = f"+{stats['additions']:,}/-{stats['deletions']:,}"
+            md.append(
+                f"| {name} | {stats['commits']} | {stats['prs_created']} | "
+                f"{stats['prs_merged']} | {stats['issues_created']} | "
+                f"{stats['issues_closed']} | {code_changes} | {repos_str} |\n"
+            )
+        md.append("\n")
+    
+    # Detailed Individual Contributions
+    md.append("### 📝 Individual Activity Details\n\n")
+    
+    for name, stats in sorted_contributors:
+        if stats['commits'] == 0:
+            continue
+            
+        md.append(f"#### 👤 {name}\n\n")
+        md.append(f"**Overview:** {stats['commits']} commits across {len(stats['repos'])} repositories\n\n")
+        
+        # Show commits by repository
+        for repo_name in sorted(stats['repos']):
+            repo_commits = detailed_activities[name].get(repo_name, [])
+            if repo_commits:
+                md.append(f"**{repo_name.capitalize()}** ({len(repo_commits)} commits):\n\n")
+                for commit in repo_commits[:5]:  # Show up to 5 commits per repo
+                    md.append(f"- [`{commit['sha']}`]({commit['url']}) {commit['message']}  \n")
+                    md.append(f"  *{commit['date'][:10]}*\n\n")
+                
+                if len(repo_commits) > 5:
+                    md.append(f"*...and {len(repo_commits) - 5} more commits*\n\n")
+        
+        md.append("\n")
     
     # Key Achievements
-    md.append("\n## 🎯 Key Achievements\n")
+    md.append("## 🎯 Key Achievements & Highlights\n\n")
     achievements = []
     
     if merged_prs > 0:
-        achievements.append(f"✅ {merged_prs} pull requests merged successfully")
+        achievements.append(f"✅ Successfully merged {merged_prs} pull request{'s' if merged_prs != 1 else ''}")
     if closed_issues > 0:
-        achievements.append(f"🎫 {closed_issues} issues resolved")
+        achievements.append(f"🎫 Resolved {closed_issues} issue{'s' if closed_issues != 1 else ''}")
     if total_commits > 50:
         achievements.append(f"🚀 High development velocity with {total_commits} commits")
+    if total_additions > 1000:
+        achievements.append(f"💻 Significant codebase expansion: +{total_additions:,} lines added")
+    if active_repos == len(REPOS):
+        achievements.append(f"🏆 All {len(REPOS)} repositories actively maintained")
     
     if achievements:
         for achievement in achievements:
             md.append(f"- {achievement}\n")
     else:
-        md.append("- Maintenance week - focus on planning and documentation\n")
+        md.append("- 📋 Maintenance week - focus on planning and documentation\n")
     
     # Footer
     md.extend([
-        "\n---\n",
-        f"*Report generated automatically on {format_date(end)}*\n"
+        "\n---\n\n",
+        f"*📄 This report was automatically generated on {format_datetime(end)}*  \n",
+        f"*🤖 Report Generator: GitHub Actions Workflow*  \n",
+        f"*📊 Data Source: GitHub REST API v3*\n"
     ])
     
     return ''.join(md)
 
 def main():
     print("🚀 Starting weekly report generation...")
+    print(f"📦 Organization: {ORG_NAME}")
     
     start, end = get_week_range()
     print(f"📅 Date range: {format_date(start)} to {format_date(end)}\n")
@@ -321,7 +507,7 @@ def main():
         })
     
     # Generate markdown
-    print("📝 Generating markdown report...")
+    print("📝 Generating production-level markdown report...")
     markdown = generate_markdown(all_data, (start, end))
     
     # Save report
@@ -335,11 +521,14 @@ def main():
     
     filepath.write_text(markdown, encoding='utf-8')
     print(f"✅ Report saved to: reports/{filename}")
+    print(f"📊 Report size: {len(markdown):,} characters")
     
     # Also update latest report
     latest_path = reports_dir / 'latest.md'
     latest_path.write_text(markdown, encoding='utf-8')
     print(f"✅ Latest report updated: reports/latest.md")
+    
+    print("\n🎉 Report generation complete!")
 
 if __name__ == '__main__':
     main()
