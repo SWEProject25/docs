@@ -2,7 +2,7 @@ name: Weekly Progress Report
 
 on:
   schedule:
-    # Runs every Friday
+    # Runs every Friday at 00:00 UTC (midnight)
     - cron: '0 0 * * 5'
   workflow_dispatch:
     inputs:
@@ -21,14 +21,14 @@ permissions:
 jobs:
   generate-report:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.PAT_TOKEN }}
           fetch-depth: 0
-      
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
@@ -44,14 +44,15 @@ jobs:
           ORG_NAME: ${{ github.repository_owner }}
           WEEK_NUMBER: ${{ inputs.week_number }}
           YEAR: ${{ inputs.year }}
-        run: python app.py
-      
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}  # Optional: for AI insights
+        run: python .github/scripts/generate_report.py
+
       - name: Commit and Push Report
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           git add reports/
-          
+
           # Determine week for commit message
           if [ -n "${{ inputs.week_number }}" ]; then
             WEEK="${{ inputs.week_number }}"
@@ -61,7 +62,7 @@ jobs:
             WEEK=$(date +%V)
             YEAR=$(date +%Y)
           fi
-          
+
           # Check if there are changes to commit
           if git diff --staged --quiet; then
             echo "No changes to commit"
