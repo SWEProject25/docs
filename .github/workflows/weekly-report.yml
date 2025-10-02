@@ -2,7 +2,7 @@ name: Weekly Progress Report
 
 on:
   schedule:
-    # Runs every Friday at 00:00 (midnight)
+    # Runs every Friday at 00:00 UTC (midnight)
     - cron: '0 0 * * 5'
   workflow_dispatch:
     inputs:
@@ -15,12 +15,15 @@ on:
         required: false
         type: string
 
+permissions:
+  contents: write
+
 jobs:
   generate-report:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout docs repo
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.PAT_TOKEN }}
@@ -30,6 +33,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
 
       - name: Install dependencies
         run: |
@@ -59,4 +63,11 @@ jobs:
             YEAR=$(date +%Y)
           fi
           
-          git diff --quiet && git diff --staged --quiet || (git commit -m "📊 Weekly Report - Week $WEEK $YEAR" && git push)
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "📊 Weekly Progress Report - Week $WEEK $YEAR"
+            git push
+            echo "✅ Report committed and pushed successfully"
+          fi
