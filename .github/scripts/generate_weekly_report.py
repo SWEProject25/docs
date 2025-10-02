@@ -17,6 +17,8 @@ REPO_OWNER = os.getenv('REPO_OWNER')
 REPO_NAME = os.getenv('REPO_NAME')
 WEEK_NUMBER = os.getenv('WEEK_NUMBER', 'auto')
 
+REPOSITORIES = ["frontend", "backend", "mobile", "testing", "devops"]
+
 HEADERS = {
     'Authorization': f'Bearer {GITHUB_TOKEN}',
     'Accept': 'application/vnd.github+json',
@@ -49,10 +51,10 @@ def get_repository_contributors():
     print(f"✅ Found {len(usernames)} contributors in repository")
     return usernames
 
-def get_commits_this_week():
-    """Get commits from the last 7 days"""
+def get_commits_this_week(repo_name):
+    """Get commits from the last 7 days for a repo"""
     since = (datetime.now() - timedelta(days=7)).isoformat()
-    url = f'https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/commits'
+    url = f'https://api.github.com/repos/{REPO_OWNER}/{repo_name}/commits'
     params = {'since': since, 'per_page': 100}
     
     all_commits = []
@@ -63,22 +65,26 @@ def get_commits_this_week():
         response = requests.get(url, headers=HEADERS, params=params)
         
         if response.status_code != 200:
-            print(f"⚠️  Warning: Could not fetch commits: {response.status_code}")
+            print(f"⚠️  Warning: Could not fetch commits for {repo_name}: {response.status_code}")
             break
         
         commits = response.json()
         if not commits:
             break
             
+        # tag commits with repo name
+        for commit in commits:
+            commit["__repo"] = repo_name
+        
         all_commits.extend(commits)
         page += 1
         
-        # Limit to 500 commits max to avoid rate limits
         if len(all_commits) >= 500:
             break
     
-    print(f"✅ Found {len(all_commits)} commits this week")
+    print(f"✅ {repo_name}: {len(all_commits)} commits this week")
     return all_commits
+
 
 def get_pull_requests_this_week():
     """Get pull requests from the last 7 days"""
