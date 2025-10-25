@@ -244,6 +244,17 @@ def format_timedelta(delta):
     else:
         return f"{minutes}m"
 
+def escape_html(text):
+    """Escape HTML special characters to prevent parser errors."""
+    if not isinstance(text, str):
+        text = str(text)
+    text = text.replace('&', '&amp;')
+    text = text.replace('<', '&lt;')
+    text = text.replace('>', '&gt;')
+    text = text.replace('"', '&quot;')
+    text = text.replace("'", '&#39;')
+    return text
+
 # --- Project Requirements Extraction ---
 
 def read_requirement_pdfs():
@@ -1076,6 +1087,7 @@ def generate_pdf_report(all_data, week_range):
             issues_data = [['#', 'TITLE', 'TYPE', 'PRIORITY', 'CREATOR', 'ASSIGNEES', 'STATUS', 'CREATED']]
             for issue in sorted(issues_created, key=lambda x: x['number'], reverse=True):
                 title = issue['title'][:40] + '...' if len(issue['title']) > 40 else issue['title']
+                title = escape_html(title)
                 status = 'OPEN' if issue['state'] == 'open' else 'CLOSED'
                 assignees = ', '.join([a['login'] for a in issue.get('assignees', [])][:1]) # Fewer assignees for display
                 if len(issue.get('assignees', [])) > 1:
@@ -1127,6 +1139,7 @@ def generate_pdf_report(all_data, week_range):
             closed_data = [['#', 'TITLE', 'TYPE', 'CLOSED BY', 'TIME TO CLOSE', 'CLOSED DATE']]
             for issue in sorted(issues_closed, key=lambda x: x['number'], reverse=True):
                 title = issue['title'][:45] + '...' if len(issue['title']) > 45 else issue['title']
+                title = escape_html(title)
                 closed_by = issue.get('closed_by', {}).get('login', 'N/A') if issue.get('closed_by') else 'N/A'
                 issue_url = issue.get('html_url', '#')
 
@@ -1169,6 +1182,7 @@ def generate_pdf_report(all_data, week_range):
             prs_data = [['#', 'TITLE', 'AUTHOR', 'STATUS', 'CHANGES', 'REVIEWERS', 'CREATED']]
             for pr in sorted(prs_opened, key=lambda x: x['number'], reverse=True):
                 title = pr['title'][:38] + '...' if len(pr['title']) > 38 else pr['title']
+                title = escape_html(title)
                 
                 if pr.get('merged_at'):
                     status = 'MERGED'
@@ -1230,6 +1244,7 @@ def generate_pdf_report(all_data, week_range):
             merged_data = [['#', 'TITLE', 'AUTHOR', 'MERGED BY', 'LINES CHANGED', 'MERGED DATE']]
             for pr in sorted(prs_merged, key=lambda x: x['merged_at'] if x.get('merged_at') else '', reverse=True):
                 title = pr['title'][:40] + '...' if len(pr['title']) > 40 else pr['title']
+                title = escape_html(title)
                 merged_by = pr.get('merged_by', {}).get('login', 'N/A') if pr.get('merged_by') else pr.get('user', {}).get('login', 'N/A')
                 lines_changed = f"+{pr.get('additions', 0)}/-{pr.get('deletions', 0)}"
                 pr_url = pr.get('html_url', '#')
